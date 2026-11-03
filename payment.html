@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>F88 - Thanh toán</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" />
+  <style>
+    body { background: #f4f6f9; font-size: 15px; }
+    .customer-card { background: #fff; border-radius: 12px; border-left: 5px solid #198754; padding: 14px; box-shadow: 0 2px 8px rgba(0,0,0,.05); margin-bottom: 12px; }
+    .badge-status { font-size: 11px; }
+    .btn { min-height: 42px; }
+  </style>
+</head>
+<body>
+  <div class="container py-4">
+    <div class="d-flex justify-content-between align-items-center mb-3 bg-white p-3 rounded shadow-sm flex-wrap gap-2">
+      <div>
+        <h4 class="mb-0 fw-bold text-success">💰 Khách thanh toán F88</h4>
+      </div>
+      <div class="d-flex gap-2 flex-wrap">
+        <a href="index.html" class="btn btn-primary btn-sm">📋 Danh sách</a>
+        <a href="map.html" class="btn btn-danger btn-sm">🗺️ Bản đồ</a>
+        <a href="ap.html" class="btn btn-warning btn-sm">🏡 Đồng Bộ</a>
+      </div>
+    </div>
+
+    <div class="card p-3 mb-3">
+      <div class="row g-2 align-items-end">
+        <div class="col-12 col-md-4">
+          <label class="form-label fw-bold small mb-1">Kỳ tháng:</label>
+          <select id="paymentMonth" class="form-select"></select>
+        </div>
+        <div class="col-12 col-md-4">
+          <label class="form-label fw-bold small mb-1">Hiển thị:</label>
+          <select id="paymentMode" class="form-select">
+            <option value="this_month">Tháng này</option>
+            <option value="previous_month">Tháng trước</option>
+            <option value="this_and_previous">Cả tháng này + tháng trước</option>
+          </select>
+        </div>
+        <div class="col-12 col-md-4 d-flex gap-2">
+          <button class="btn btn-success flex-fill" onclick="loadPaymentCustomers()">🔄 Tải</button>
+          <button class="btn btn-outline-secondary flex-fill" onclick="resetPaymentFilters()">Làm mới</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="row g-2 mb-3 text-secondary small">
+      <div class="col-6 col-md-3"><span class="badge bg-primary">Tổng: <b id="paymentTotal">0</b></span></div>
+      <div class="col-6 col-md-3"><span class="badge bg-success">Đã thanh toán: <b id="paymentPaid">0</b></span></div>
+      <div class="col-6 col-md-3"><span class="badge bg-warning text-dark">Chưa TT: <b id="paymentUnpaid">0</b></span></div>
+      <div class="col-6 col-md-3"><span class="badge bg-info text-dark">Cả 2 tháng: <b id="paymentCombined">0</b></span></div>
+    </div>
+
+    <div id="paymentList" class="mt-2"></div>
+  </div>
+
+  <div id="toast-container" class="position-fixed bottom-0 end-0 p-3" style="z-index:1060;"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="api.js"></script>
+  <script>
+    const monthKeys = [];
+
+    function normalizeMonthKey(value) {
+      const text = String(value || '').trim();
+      if (!text) return '';
+      const noSpace = text.replace(/tháng/gi, '').replace(/\s+/g, '');
+      const slash = noSpace.match(/(\d{1,2})[\/\-.](\d{4})/);
+      if (slash) return slash[1].padStart(2, '0') + slash[2];
+      const reverse = noSpace.match(/(\d{4})[\/\-.](\d{1,2})/);
+      if (reverse) return reverse[2].padStart(2, '0') + reverse[1];
+      const compact = noSpace.match(/(\d{1,2})(\d{4})/);
+      if (compact) return compact[1].padStart(2, '0') + compact[2];
+      return noSpace;
+    }
+
+    function formatMonthLabel(value) {
+      const normalized = normalizeMonthKey(value);
+      if (!normalized) return 'Tất cả';
+      if (/^\d{6}$/.test(normalized)) return normalized.slice(0, 2) + '/' + normalized.slice(2);
+      return normalized;
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+    }
+
+    function showToast(message, type = 'primary') {
+      const container = document.getElementById('toast-container');
+      const toast = document.createElement('div');
+      toast.className = 'toast align-items-center text-white bg-' + type + ' border-0 show';
+      toast.role = 'alert';
+      toast.innerHTML = '<div class="d-flex"><div class="toast-body">' + escapeHtml(message) + '</div><button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button></div>';
+      container.appendChild(toast);
+      setTimeout(() => toast.remove(), 2600);
+    }
+
+    async function initPaymentPage() {
+      try {
+        const monthsResult = await window.F88_API.fetch('getMonths');
+        const months = Array.isArray(monthsResult.months) ? monthsResult.months : [];
+        const valid = months.filter((m) => String(m).trim() && String(m).toLowerCase() !== 'ap_new' && String(m).toLowerCase() !== 'ap_old');
+        const monthSelect = document.getElementById('paymentMonth');
+        monthSelect.innerHTML = '<option value="">-- Chọn kỳ --</option>';
+        valid.forEach((month) => {
+          const option = document.createElement('option');
+          option.value = normalizeMonthKey(month);
+          option.textContent = 'Kỳ ' + formatMonthLabel(month);
+          monthSelect.appendChild(option);
+        });
+        if (valid.length) {
+          monthSelect.value = normalizeMonthKey(valid[valid.length - 1]);
+        }
+        loadPaymentCustomers();
+      } catch (error) {
+        showToast('Không thể tải danh sách kỳ tháng', 'danger');
+      }
+    }
+
+    async function loadPaymentCustomers() {
+      const month = document.getElementById('paymentMonth').value;
+      const mode = document.getElementById('paymentMode').value;
+      const listNode = document.getElementById('paymentList');
+      listNode.innerHTML = '<div class="text-center text-muted py-5">Đang tải khách hàng thanh toán...</div>';
+
+      try {
+        const result = await window.F88_API.fetch('getData', { month: month || '' });
+        const rows = Array.isArray(result.data) ? result.data : [];
+
+        const monthKey = normalizeMonthKey(month || '');
+        const previousMonth = getPreviousMonthKey(monthKey);
+
+        let filtered = rows.filter((row) => {
+          const amount = Number(row.So_tien_thanh_toan || row['So_tien_thanh_toan'] || 0);
+          return amount > 0;
+        });
+
+        if (mode === 'this_month') {
+          filtered = filtered.filter((row) => normalizeMonthKey(row.month || row['month'] || row['Kỳ'] || row['Ky'] || '') === monthKey);
+        } else if (mode === 'previous_month') {
+          filtered = filtered.filter((row) => normalizeMonthKey(row.month || row['month'] || row['Kỳ'] || row['Ky'] || '') === previousMonth);
+        } else {
+          filtered = filtered.filter((row) => {
+            const rowMonth = normalizeMonthKey(row.month || row['month'] || row['Kỳ'] || row['Ky'] || '');
+            return rowMonth === monthKey || rowMonth === previousMonth;
+          });
+        }
+
+        filtered.sort((a, b) => Number(b.So_tien_thanh_toan || b['So_tien_thanh_toan'] || 0) - Number(a.So_tien_thanh_toan || a['So_tien_thanh_toan'] || 0));
+
+        document.getElementById('paymentTotal').textContent = String(filtered.length);
+        document.getElementById('paymentPaid').textContent = String(filtered.filter((r) => Number(r.So_tien_thanh_toan || r['So_tien_thanh_toan'] || 0) > 0).length);
+        document.getElementById('paymentUnpaid').textContent = String(Math.max(filtered.length - filtered.filter((r) => Number(r.So_tien_thanh_toan || r['So_tien_thanh_toan'] || 0) > 0).length, 0));
+        document.getElementById('paymentCombined').textContent = String(filtered.filter((r) => normalizeMonthKey(r.month || r['month'] || r['Kỳ'] || r['Ky'] || '') === monthKey || normalizeMonthKey(r.month || r['month'] || r['Kỳ'] || r['Ky'] || '') === previousMonth).length);
+
+        if (!filtered.length) {
+          listNode.innerHTML = '<div class="text-center text-muted py-5">Không có khách hàng thanh toán trong khoảng thời gian này.</div>';
+          return;
+        }
+
+        listNode.innerHTML = filtered.map((row, idx) => {
+          const name = row.Ten_khach_hang || row['Ten_khach_hang'] || 'Khách hàng';
+          const soHd = row.so_hd || row['so_hd'] || '---';
+          const phone = row.sdt || row['sdt'] || '---';
+          const amount = Number(row.So_tien_thanh_toan || row['So_tien_thanh_toan'] || 0);
+          const rowMonth = normalizeMonthKey(row.month || row['month'] || row['Kỳ'] || row['Ky'] || '');
+          const status = amount > 0 ? 'Đã TT' : 'Chưa TT';
+          return `
+            <div class="customer-card">
+              <div class="d-flex justify-content-between align-items-start gap-2">
+                <div>
+                  <div class="fw-bold text-primary">${escapeHtml(name)}</div>
+                  <div class="small text-muted">HĐ: ${escapeHtml(soHd)} | SĐT: ${escapeHtml(phone)}</div>
+                </div>
+                <span class="badge badge-status ${amount > 0 ? 'bg-success' : 'bg-warning text-dark'}">${status}</span>
+              </div>
+              <div class="d-flex justify-content-between mt-3 small text-secondary">
+                <span>💰 Số tiền: <b class="text-dark">${amount.toLocaleString()} VNĐ</b></span>
+                <span>📅 Kỳ: <b>${escapeHtml(formatMonthLabel(rowMonth || monthKey || ''))}</b></span>
+              </div>
+            </div>
+          `;
+        }).join('');
+
+        showToast('Đã tải ' + filtered.length + ' khách thanh toán.', 'success');
+      } catch (error) {
+        console.error(error);
+        showToast('Lỗi tải khách hàng thanh toán.', 'danger');
+      }
+    }
+
+    function getPreviousMonthKey(currentMonth) {
+      if (!currentMonth || !/^\d{6}$/.test(currentMonth)) return '';
+      const year = Number(currentMonth.slice(2));
+      const month = Number(currentMonth.slice(0, 2));
+      let prevMonth = month - 1;
+      let prevYear = year;
+      if (prevMonth <= 0) {
+        prevMonth = 12;
+        prevYear -= 1;
+      }
+      return String(prevMonth).padStart(2, '0') + String(prevYear);
+    }
+
+    function resetPaymentFilters() {
+      document.getElementById('paymentMonth').value = '';
+      document.getElementById('paymentMode').value = 'this_month';
+      loadPaymentCustomers();
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      initPaymentPage();
+    });
+
+    window.loadPaymentCustomers = loadPaymentCustomers;
+    window.resetPaymentFilters = resetPaymentFilters;
+  </script>
+</body>
+</html>

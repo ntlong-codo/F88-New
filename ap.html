@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>F88 - Đồng Bộ</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" />
+  <style>
+    body { background: #f4f6f9; font-size: 15px; }
+    .card { border-radius: 14px; box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+    .btn { min-height: 42px; }
+  </style>
+</head>
+<body>
+  <div class="container py-4">
+    <div class="d-flex justify-content-between align-items-center mb-3 bg-white p-3 rounded shadow-sm flex-wrap gap-2">
+      <div>
+        <h4 class="mb-0 fw-bold text-warning">🏡 Đồng Bộ F88</h4>
+      </div>
+      <div class="d-flex gap-2 flex-wrap">
+        <a href="index.html" class="btn btn-primary btn-sm">📋 Danh sách</a>
+        <a href="map.html" class="btn btn-danger btn-sm">🗺️ Bản đồ</a>
+        <a href="payment.html" class="btn btn-success btn-sm">💰 Thanh toán</a>
+      </div>
+    </div>
+
+    <div class="row g-3">
+      <div class="col-12 col-lg-6">
+        <div class="card p-3 h-100">
+          <h5 class="fw-bold text-primary mb-3">📊 Đồng bộ dữ liệu</h5>
+          <div class="mb-3">
+            <label class="form-label fw-bold small">Chọn kỳ:</label>
+            <select id="monthSelect" class="form-select"></select>
+          </div>
+          <button id="syncDataBtn" class="btn btn-primary w-100 mb-2" onclick="syncDataFromSheets()">🔄 Đồng bộ dữ liệu từ các sheet kỳ tháng</button>
+          <button id="syncApBtn" class="btn btn-warning w-100 mb-2" onclick="syncAddressToApTabs()">🏡 Đồng bộ & kiểm tra trùng lặp AP</button>
+          <button id="assignGpsBtn" class="btn btn-success w-100" onclick="assignGpsFromApTabs()">📍 Gán GPS từ AP sang khách hàng</button>
+        </div>
+      </div>
+
+      <div class="col-12 col-lg-6">
+        <div class="card p-3 h-100">
+          <h5 class="fw-bold text-success mb-3">🧾 Trạng thái</h5>
+          <div id="statusBox" class="alert alert-secondary mb-0">
+            Chưa có thao tác nào được thực hiện.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card p-3 mt-4">
+      <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+        <h5 class="fw-bold text-danger mb-0">🏡 Danh sách ấp và GPS</h5>
+        <div class="d-flex gap-2 small text-muted">
+          <span class="badge bg-primary">Tổng: <b id="statTotal">0</b></span>
+          <span class="badge bg-danger">Chưa GPS: <b id="statNoGps">0</b></span>
+        </div>
+      </div>
+
+      <div class="row g-2 mb-3">
+        <div class="col-12 col-md-4">
+          <label class="form-label fw-bold small mb-1">Tab ấp:</label>
+          <select id="selectTab" class="form-select">
+            <option value="ap_new">Ấp mới</option>
+            <option value="ap_old">Ấp cũ</option>
+          </select>
+        </div>
+        <div class="col-12 col-md-5">
+          <label class="form-label fw-bold small mb-1">Tìm kiếm:</label>
+          <input id="searchApKeyword" type="text" class="form-control" placeholder="Tên ấp, xã, huyện..." />
+        </div>
+        <div class="col-12 col-md-3">
+          <label class="form-label fw-bold small mb-1">Lọc:</label>
+          <div class="form-check mt-2">
+            <input id="filterNoGps" class="form-check-input" type="checkbox" />
+            <label class="form-check-label small" for="filterNoGps">Chỉ ấp chưa GPS</label>
+          </div>
+        </div>
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label fw-bold small mb-1">Kỳ đồng bộ:</label>
+        <select id="syncMonthSelect" class="form-select">
+          <option value="">⚡ Tất cả các tháng</option>
+        </select>
+      </div>
+
+      <div id="apCardContainer" class="d-grid gap-2">
+        <div class="text-center text-muted py-5 bg-light rounded border">Đang tải dữ liệu ấp...</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="gpsPickerModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header bg-danger text-white">
+          <h5 class="modal-title fw-bold" id="modalTitle">📍 GPS ấp</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div id="modalAddressInfo" class="small text-muted mb-2"></div>
+          <div class="input-group mb-3">
+            <input id="modalGpsInput" type="text" class="form-control" placeholder="Ví dụ: 10.123456, 105.765432" />
+            <button class="btn btn-primary" type="button" onclick="getCurrentLocationMobile()">📍 Lấy vị trí</button>
+          </div>
+          <div id="mapPicker" style="height: 320px; width: 100%; border-radius: 10px; overflow: hidden; border: 1px solid #dee2e6;"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+          <button type="button" class="btn btn-success" onclick="saveGpsFromModal()">💾 Lưu GPS</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast-container" class="position-fixed bottom-0 end-0 p-3" style="z-index: 1060;"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="api.js"></script>
+  <script>
+    let allApData = { ap_new: [], ap_old: [] };
+    let currentEditingRow = null;
+    let currentEditingTab = null;
+    let mapPickerObj = null;
+    let pickerMarker = null;
+
+    async function loadMonths() {
+      const select = document.getElementById('monthSelect');
+      const syncSelect = document.getElementById('syncMonthSelect');
+      try {
+        const result = await window.F88_API.fetch('getMonths');
+        const months = Array.isArray(result.months) ? result.months : [];
+        const valid = months.filter((m) => String(m).trim() && String(m).toLowerCase() !== 'ap_new' && String(m).toLowerCase() !== 'ap_old');
+        select.innerHTML = '<option value="">-- Chọn kỳ --</option>';
+        if (syncSelect) syncSelect.innerHTML = '<option value="">⚡ Tất cả các tháng</option>';
+        valid.forEach((month) => {
+          const option = document.createElement('option');
+          option.value = month;
+          option.textContent = 'Kỳ ' + month;
+          select.appendChild(option.cloneNode(true));
+
+          if (syncSelect) {
+            const syncOption = document.createElement('option');
+            syncOption.value = month;
+            syncOption.textContent = 'Kỳ ' + month;
+            syncSelect.appendChild(syncOption);
+          }
+        });
+      } catch (error) {
+        setStatus('Lỗi khi tải danh sách kỳ tháng. Kiểm tra lại API.', 'danger');
+      }
+    }
+
+    async function loadApData() {
+      showToast('Đang tải dữ liệu từ các tab Ấp...', 'primary');
+      try {
+        const json = await window.F88_API.fetch('getApData');
+        if (json && json.success) {
+          allApData.ap_new = Array.isArray(json.ap_new) ? json.ap_new : [];
+          allApData.ap_old = Array.isArray(json.ap_old) ? json.ap_old : [];
+          renderApList();
+          showToast('Đã tải dữ liệu ấp thành công!');
+        } else {
+          showToast('Lỗi tải dữ liệu ấp!', 'danger');
+        }
+      } catch (error) {
+        showToast('Không thể kết nối đến API ấp!', 'danger');
+      }
+    }
+
+    function setStatus(message, type) {
+      const box = document.getElementById('statusBox');
+      if (!box) return;
+      box.className = 'alert mb-0 alert-' + (type || 'secondary');
+      box.textContent = message;
+    }
+
+    function renderApList() {
+      const tabName = document.getElementById('selectTab').value;
+      const keyword = (document.getElementById('searchApKeyword').value || '').toLowerCase();
+      const onlyNoGps = document.getElementById('filterNoGps').checked;
+      const container = document.getElementById('apCardContainer');
+
+      const rawList = allApData[tabName] || [];
+      const totalCount = rawList.length;
+      let noGpsCount = 0;
+
+      const filtered = rawList.filter((item) => {
+        const hasGps = !!(item.gps && String(item.gps).includes(','));
+        if (!hasGps) noGpsCount++;
+        if (onlyNoGps && hasGps) return false;
+        const fullStr = `${item.ap || ''} ${item.xaphuong || ''} ${item.quanhuyen || ''} ${item.tinhtp || ''}`.toLowerCase();
+        if (keyword && !fullStr.includes(keyword)) return false;
+        return true;
+      });
+
+      document.getElementById('statTotal').innerText = totalCount;
+      document.getElementById('statNoGps').innerText = noGpsCount;
+
+      if (filtered.length === 0) {
+        container.innerHTML = '<div class="text-center py-5 text-muted bg-white rounded shadow-sm">Không tìm thấy ấp nào phù hợp.</div>';
+        return;
+      }
+
+      container.innerHTML = filtered.map((item) => {
+        const hasGps = !!(item.gps && String(item.gps).includes(','));
+        const gpsBadge = hasGps ? '<span class="badge bg-success">Đã có GPS</span>' : '<span class="badge bg-danger">Chưa có GPS</span>';
+
+        let addressDisplay = '';
+        if (tabName === 'ap_new') {
+          addressDisplay = `<b>🏡 Ấp:</b> ${item.ap || '---'} | <b>Xã:</b> ${item.xaphuong || '---'} | <b>Tỉnh:</b> ${item.tinhtp || '---'}`;
+        } else {
+          addressDisplay = `<b>🏡 Ấp:</b> ${item.ap || '---'} | <b>Xã:</b> ${item.xaphuong || '---'} | <b>Huyện:</b> ${item.quanhuyen || '---'} | <b>Tỉnh:</b> ${item.tinhtp || '---'}`;
+        }
+
+        const mapUrl = hasGps ? `https://www.google.com/maps?q=${encodeURIComponent(item.gps)}` : '#';
+        const mapBtnClass = hasGps ? 'btn-danger' : 'btn-outline-secondary disabled';
+
+        return `
+          <div class="ap-card ${hasGps ? 'has-gps' : 'no-gps'}">
+            <div class="d-flex justify-content-between align-items-start mb-1">
+              <div>${gpsBadge} <span class="font-monospace text-muted small ms-2">Dòng #${item.rowIndex || ''}</span></div>
+              <div class="d-flex gap-1">
+                <button class="btn btn-sm btn-primary fw-bold" onclick="openGpsModal('${tabName}', ${item.rowIndex || 0}, '${String(item.ap || '').replace(/'/g, "\\'")}', '${String(item.xaphuong || '').replace(/'/g, "\\'")}', '${String(item.gps || '').replace(/'/g, "\\'")}')">
+                  ${hasGps ? '✏️ Sửa GPS' : '📍 Thêm GPS'}
+                </button>
+                <a href="${mapUrl}" target="_blank" class="btn btn-sm ${mapBtnClass}">🗺️</a>
+              </div>
+            </div>
+            <div class="small text-secondary mb-1">${addressDisplay}</div>
+            <div class="small font-monospace text-dark bg-light p-1 rounded border">
+              <b>Tọa độ:</b> ${item.gps || '<i class="text-muted">Chưa cập nhật</i>'}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function openGpsModal(tabName, rowIndex, apName, xaName, currentGps) {
+      currentEditingRow = rowIndex;
+      currentEditingTab = tabName;
+      document.getElementById('modalTitle').innerText = `📍 Cập Nhật GPS: ${apName} (${xaName})`;
+      document.getElementById('modalAddressInfo').innerText = `Tab: ${tabName} | Dòng: #${rowIndex} | Ấp: ${apName}`;
+      document.getElementById('modalGpsInput').value = currentGps || '';
+
+      const myModal = new bootstrap.Modal(document.getElementById('gpsPickerModal'));
+      myModal.show();
+      setTimeout(() => initMapPicker(currentGps || ''), 300);
+    }
+
+    function initMapPicker(gpsStr) {
+      let initialLat = 10.030;
+      let initialLng = 105.770;
+      let zoomLevel = 13;
+
+      if (gpsStr && gpsStr.includes(',')) {
+        const p = gpsStr.split(',').map((s) => parseFloat(s.trim()));
+        if (!isNaN(p[0]) && !isNaN(p[1])) {
+          initialLat = p[0];
+          initialLng = p[1];
+          zoomLevel = 16;
+        }
+      }
+
+      if (!mapPickerObj) {
+        mapPickerObj = L.map('mapPicker').setView([initialLat, initialLng], zoomLevel);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(mapPickerObj);
+        mapPickerObj.on('click', function (e) {
+          const lat = e.latlng.lat.toFixed(6);
+          const lng = e.latlng.lng.toFixed(6);
+          document.getElementById('modalGpsInput').value = `${lat}, ${lng}`;
+          setPickerMarker(lat, lng);
+        });
+      } else {
+        mapPickerObj.invalidateSize();
+        mapPickerObj.setView([initialLat, initialLng], zoomLevel);
+      }
+
+      if (gpsStr && gpsStr.includes(',')) {
+        const p = gpsStr.split(',').map((s) => parseFloat(s.trim()));
+        setPickerMarker(p[0], p[1]);
+      } else if (pickerMarker) {
+        mapPickerObj.removeLayer(pickerMarker);
+        pickerMarker = null;
+      }
+    }
+
+    function setPickerMarker(lat, lng) {
+      if (pickerMarker) {
+        pickerMarker.setLatLng([lat, lng]);
+      } else {
+        pickerMarker = L.marker([lat, lng], { draggable: true }).addTo(mapPickerObj);
+        pickerMarker.on('dragend', function (e) {
+          const pos = e.target.getLatLng();
+          document.getElementById('modalGpsInput').value = `${pos.lat.toFixed(6)}, ${pos.lng.toFixed(6)}`;
+        });
+      }
+      mapPickerObj.setView([lat, lng], mapPickerObj.getZoom());
+    }
+
+    function getCurrentLocationMobile() {
+      if (!navigator.geolocation) {
+        alert('Trình duyệt không hỗ trợ định vị!');
+        return;
+      }
+      navigator.geolocation.getCurrentPosition((pos) => {
+        const lat = pos.coords.latitude.toFixed(6);
+        const lng = pos.coords.longitude.toFixed(6);
+        document.getElementById('modalGpsInput').value = `${lat}, ${lng}`;
+        setPickerMarker(lat, lng);
+        showToast('Đã lấy vị trí hiện tại!');
+      }, () => {
+        alert('Không thể lấy vị trí hiện tại. Vui lòng cấp quyền GPS.');
+      }, { enableHighAccuracy: true });
+    }
+
+    async function saveGpsFromModal() {
+      const gpsVal = document.getElementById('modalGpsInput').value.trim();
+      if (!gpsVal) {
+        alert('Vui lòng nhập hoặc chọn tọa độ GPS!');
+        return;
+      }
+
+      showToast('Đang lưu tọa độ...', 'primary');
+      try {
+        const json = await window.F88_API.post('updateApGps', {
+          tabName: currentEditingTab,
+          rowIndex: currentEditingRow,
+          gps: gpsVal
+        });
+
+        if (json && json.success) {
+          showToast('Đã lưu tọa độ thành công!');
+          const list = allApData[currentEditingTab] || [];
+          const item = list.find((d) => Number(d.rowIndex) === Number(currentEditingRow));
+          if (item) item.gps = gpsVal;
+          renderApList();
+          bootstrap.Modal.getInstance(document.getElementById('gpsPickerModal')).hide();
+        } else {
+          showToast('Lỗi khi lưu: ' + (json && json.message ? json.message : 'Unknown'), 'danger');
+        }
+      } catch (error) {
+        showToast('Lỗi kết nối server: ' + error.message, 'danger');
+      }
+    }
+
+    async function syncDataFromSheets() {
+      const month = document.getElementById('monthSelect').value;
+      setStatus('Đang đồng bộ dữ liệu...', 'secondary');
+      try {
+        const result = await window.F88_API.post('syncDataFromSheets', { targetMonth: month });
+        setStatus(result.message || 'Đồng bộ dữ liệu thành công.', result.success ? 'success' : 'danger');
+      } catch (error) {
+        setStatus('Không thể đồng bộ dữ liệu: ' + error.message, 'danger');
+      }
+    }
+
+    async function syncAddressToApTabs() {
+      const month = document.getElementById('monthSelect').value;
+      setStatus('Đang đồng bộ địa chỉ vào AP...', 'secondary');
+      try {
+        const result = await window.F88_API.post('syncAddressToApTabs', { targetMonth: month });
+        setStatus(result.message || 'Đồng bộ AP thành công.', result.success ? 'success' : 'danger');
+        if (result && result.success) loadApData();
+      } catch (error) {
+        setStatus('Không thể đồng bộ AP: ' + error.message, 'danger');
+      }
+    }
+
+    async function assignGpsFromApTabs() {
+      const month = document.getElementById('monthSelect').value;
+      setStatus('Đang gán GPS từ AP...', 'secondary');
+      try {
+        const result = await window.F88_API.post('assignGpsFromApTabs', { targetMonth: month });
+        setStatus(result.message || 'Gán GPS thành công.', result.success ? 'success' : 'danger');
+        if (result && result.success) loadApData();
+      } catch (error) {
+        setStatus('Không thể gán GPS: ' + error.message, 'danger');
+      }
+    }
+
+    async function executeSyncCustomers() {
+      const targetMonth = document.getElementById('syncMonthSelect').value;
+      showToast('Đang đồng bộ thông tin khách hàng...', 'primary');
+      try {
+        const json = await window.F88_API.post('syncDataFromSheets', { targetMonth: targetMonth });
+        showToast(json.message || 'Đồng bộ khách hàng thành công.');
+        loadApData();
+      } catch (error) {
+        showToast('Lỗi đồng bộ khách hàng: ' + error.message, 'danger');
+      }
+    }
+
+    async function executeSyncAddressOnly() {
+      const targetMonth = document.getElementById('syncMonthSelect').value;
+      showToast('Đang quét & chuẩn hóa địa chỉ vào tab Ấp...', 'primary');
+      try {
+        const json = await window.F88_API.post('syncAddressToApTabs', { targetMonth: targetMonth });
+        showToast(json.message || 'Đồng bộ địa chỉ thành công.');
+        loadApData();
+      } catch (error) {
+        showToast('Lỗi đồng bộ địa chỉ: ' + error.message, 'danger');
+      }
+    }
+
+    async function executeEnsureMonthColumns() {
+      const targetMonth = document.getElementById('syncMonthSelect').value;
+      showToast('Đang bổ sung cột thiếu cho tab kỳ tháng...', 'primary');
+      try {
+        const json = await window.F88_API.post('ensureColumnsInMonthTabs', { targetMonth: targetMonth });
+        showToast(json.message || 'Bổ sung cột thành công.');
+      } catch (error) {
+        showToast('Lỗi bổ sung cột: ' + error.message, 'danger');
+      }
+    }
+
+    async function executeRemoveDuplicates() {
+      if (!confirm('Hệ thống sẽ quét và gộp các địa chỉ trùng lặp trong cả 2 tab ap_new và ap_old, ưu tiên giữ lại các dòng đã có GPS. Bạn có chắc chắn muốn chạy?')) return;
+
+      showToast('Đang dọn dẹp các dòng trùng lặp...', 'primary');
+      try {
+        await window.F88_API.post('removeDuplicateAp', { tabName: 'ap_new' });
+        const json = await window.F88_API.post('removeDuplicateAp', { tabName: 'ap_old' });
+        showToast(json.message || 'Đã dọn dẹp dữ liệu ấp.');
+        loadApData();
+      } catch (error) {
+        showToast('Lỗi dọn dẹp ấp: ' + error.message, 'danger');
+      }
+    }
+
+    async function executeAssignGps() {
+      showToast('Đang gán ngược GPS từ tab Ấp...', 'primary');
+      try {
+        const json = await window.F88_API.post('assignGpsFromApTabs', {});
+        showToast(json.message || 'Gán ngược GPS thành công.');
+        loadApData();
+      } catch (error) {
+        showToast('Lỗi gán ngược GPS: ' + error.message, 'danger');
+      }
+    }
+
+    function showToast(msg, type = 'success') {
+      const c = document.getElementById('statusBox');
+      if (c) {
+        c.className = 'alert mb-0 alert-' + (type === 'danger' ? 'danger' : type === 'primary' ? 'primary' : 'success');
+        c.textContent = msg;
+      }
+      const toastContainer = document.getElementById('toast-container');
+      if (!toastContainer) return;
+      const id = 'toast_' + Date.now();
+      toastContainer.insertAdjacentHTML('beforeend', `<div id="${id}" class="toast align-items-center text-white bg-${type === 'danger' ? 'danger' : type === 'primary' ? 'primary' : 'success'} border-0 shadow show mb-2"><div class="d-flex"><div class="toast-body fw-bold">${msg}</div></div></div>`);
+      setTimeout(() => document.getElementById(id)?.remove(), 2500);
+    }
+
+    async function initializePage() {
+      await loadMonths();
+      await loadApData();
+
+      const selectTab = document.getElementById('selectTab');
+      const searchInput = document.getElementById('searchApKeyword');
+      const filterNoGps = document.getElementById('filterNoGps');
+
+      if (selectTab) selectTab.addEventListener('change', renderApList);
+      if (searchInput) searchInput.addEventListener('input', renderApList);
+      if (filterNoGps) filterNoGps.addEventListener('change', renderApList);
+    }
+
+    window.addEventListener('DOMContentLoaded', initializePage);
+  </script>
+</body>
+</html>

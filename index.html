@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>F88 - Dashboard</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" />
+  <style>
+    body {
+      background: #f4f6f9;
+      font-size: 15px;
+      color: #1d1d1f;
+    }
+
+    .customer-card {
+      background: #fff;
+      border-radius: 12px;
+      border-left: 5px solid #0d6efd;
+      margin-bottom: 12px;
+      padding: 14px 16px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    }
+
+    .row-check-ao {
+      border-left-color: #6f42c1 !important;
+      background: #f8f3ff !important;
+    }
+
+    .row-check-gps {
+      border-left-color: #198754 !important;
+      background: #f2fff8 !important;
+    }
+
+    .sub-section {
+      border-left: 3px solid #0d6efd;
+      padding-left: 10px;
+      margin-top: 8px;
+    }
+
+    #toast-container {
+      position: fixed;
+      bottom: 18px;
+      right: 18px;
+      z-index: 1055;
+      max-width: 420px;
+      width: calc(100% - 36px);
+    }
+
+    .btn,
+    .form-select,
+    .form-control {
+      min-height: 42px;
+    }
+  </style>
+</head>
+<body>
+  <div id="authOverlay">
+    <div class="card p-4 shadow-lg text-center" style="max-width: 380px; width: 90%;">
+      <h4 class="mb-3">🔐 BẢO MẬT HỆ THỐNG</h4>
+      <input type="password" id="passInput" class="form-control mb-3 text-center fs-5" placeholder="Nhập mật khẩu..." onkeyup="if(event.key==='Enter') checkAuth()" />
+      <button class="btn btn-primary w-100 fw-bold" onclick="checkAuth()">XÁC NHẬN</button>
+      <div id="authError" class="text-danger small mt-2 d-none">Mật khẩu không chính xác!</div>
+    </div>
+  </div>
+
+  <div class="container py-3 px-2 d-none" id="mainContent">
+    <div class="d-flex justify-content-between align-items-center mb-2 bg-white p-2 rounded shadow-sm flex-wrap gap-2">
+      <h5 class="mb-0 fw-bold text-primary">📋 F88</h5>
+      <div class="d-flex gap-1 flex-wrap">
+        <a href="index.html" class="btn btn-primary btn-sm fw-bold">📋 Danh sách</a>
+        <a href="map.html" class="btn btn-danger btn-sm fw-bold">🗺️ Bản đồ</a>
+        <a href="ap.html" class="btn btn-warning btn-sm fw-bold">🏡 Đồng Bộ</a>
+        <a href="payment.html" class="btn btn-success btn-sm fw-bold">💰 Thanh toán</a>
+        <button class="btn btn-outline-secondary btn-sm" onclick="logout()">🔒</button>
+      </div>
+    </div>
+
+    <div class="card p-2 mb-2 bg-white shadow-sm text-center">
+      <div class="row small fw-bold g-1">
+        <div class="col-4 border-end">📂 Tên Kỳ: <br><span id="statMonthName" class="text-primary fs-6">---</span></div>
+        <div class="col-4 border-end">☀️ Check Hôm Nay: <br><span id="statTodayCheck" class="text-warning fs-6">0</span></div>
+        <div class="col-4">📊 Tổng Check: <br><span id="statTotalCheck" class="text-success fs-6">0</span></div>
+        <div class="col-6 border-top pt-1">🔴 Chưa Check: <br><span id="statUnchecked" class="text-danger fs-6">0</span></div>
+        <div class="col-6 border-top pt-1">👥 Tổng Khách: <br><span id="statTotalCust" class="text-dark fs-6">0</span></div>
+      </div>
+    </div>
+
+    <div class="d-flex gap-2 mb-3 flex-wrap">
+      <button id="gpsFilterToggleBtn" class="btn btn-outline-danger fw-bold text-nowrap" onclick="toggleGpsFilterMode()">📍 Lọc GPS: TẮT</button>
+      <div class="input-group shadow-sm flex-grow-1">
+        <input type="text" id="searchKeyword" class="form-control" placeholder="🔍 Tìm tên, số HĐ..." oninput="filterData()" />
+        <button class="btn btn-outline-primary" type="button" data-bs-toggle="offcanvas" data-bs-target="#filterDrawer">
+          ⚙️ Lọc (<span id="activeFilterCount">0</span>)
+        </button>
+      </div>
+    </div>
+
+    <div id="gpsFilterControlBox" class="card p-2 mb-3 bg-light border-danger d-none">
+      <div class="row g-2">
+        <div class="col-6">
+          <label class="small fw-bold text-danger mb-1">📅 Kỳ tháng:</label>
+          <select id="gpsFilterMonth" class="form-select form-select-sm" onchange="syncMonthAndReload(this.value)">
+            <option value="">-- Tất cả tháng --</option>
+          </select>
+        </div>
+        <div class="col-6">
+          <label class="small fw-bold text-danger mb-1">🔍 Check:</label>
+          <select id="gpsFilterCheckState" class="form-select form-select-sm fw-bold text-danger" onchange="filterData()">
+            <option value="ChuaCheck" selected>🔴 Chưa check</option>
+            <option value="DaCheckGps">🟢 Đã Check GPS</option>
+            <option value="DaCheckAo">🟣 Đã Check Áo</option>
+            <option value="">⚡ Tất cả</option>
+          </select>
+        </div>
+        <div class="col-12 mt-1">
+          <label class="small fw-bold text-danger mb-1">📍 Loại GPS:</label>
+          <select id="gpsFilterType" class="form-select form-select-sm fw-bold text-primary" onchange="filterData()">
+            <option value="all" selected>⚡ Tất cả loại GPS</option>
+            <option value="GPS_Chinh">GPS chính</option>
+            <option value="GPS_CHECK_1_5">GPS check (1 tới 5)</option>
+            <option value="GPS_AP_NEW">Ấp New</option>
+            <option value="GPS_AP_OLD">Ấp Old</option>
+          </select>
+        </div>
+        <div class="col-12">
+          <div class="d-flex justify-content-between align-items-center mb-1 gap-2">
+            <label class="small fw-bold text-danger mb-0">🏡 Lọc Ấp:</label>
+            <button id="gpsFilterApToggleBtn" type="button" class="btn btn-sm btn-outline-warning fw-bold" onclick="toggleApFilterMode()">🏡 Bật</button>
+          </div>
+        </div>
+      </div>
+      <div class="text-center mt-2"><small class="text-muted" id="gpsStatusText">Đang định vị...</small></div>
+    </div>
+
+    <div id="customerCardContainer">
+      <div class="text-center py-5 text-muted bg-white rounded shadow-sm">
+        <div class="spinner-border text-primary mb-2" role="status"></div>
+        <div id="loadingStatusText">Đang khởi tạo màn hình...</div>
+        <small id="loadingDetailText" class="text-secondary d-block mt-1">Chuẩn bị kết nối API...</small>
+      </div>
+    </div>
+  </div>
+
+  <div class="offcanvas offcanvas-end" tabindex="-1" id="filterDrawer">
+    <div class="offcanvas-header bg-dark text-white">
+      <h5 class="offcanvas-title">⚙️ Bộ Lọc Nâng Cao</h5>
+      <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas"></button>
+    </div>
+    <div class="offcanvas-body">
+      <div class="mb-3">
+        <label class="form-label fw-bold small">Kỳ tháng:</label>
+        <select id="filterMonth" class="form-select" onchange="syncMonthAndReload(this.value); updateFilterCount();">
+          <option value="">-- Tất cả tháng --</option>
+        </select>
+      </div>
+      <div class="mb-3">
+        <label class="form-label fw-bold small">Trạng Thái Check:</label>
+        <select id="filterCheck" class="form-select fw-bold text-danger" onchange="filterData(); updateFilterCount();">
+          <option value="">⚡ Tất cả</option>
+          <option value="ChuaCheck">🔴 Chưa check</option>
+          <option value="DaCheckGps">🟢 Đã Check GPS</option>
+          <option value="DaCheckAo">🟣 Đã Check Áo</option>
+        </select>
+      </div>
+      <div class="mb-3">
+        <label class="form-label fw-bold small">📍 Loại GPS:</label>
+        <select id="filterGpsType" class="form-select fw-bold text-primary" onchange="filterData(); updateFilterCount();">
+          <option value="all" selected>⚡ Tất cả loại GPS</option>
+          <option value="GPS_Chinh">GPS chính</option>
+          <option value="GPS_CHECK_1_5">GPS check (1 tới 5)</option>
+          <option value="GPS_AP_NEW">Ấp New</option>
+          <option value="GPS_AP_OLD">Ấp Old</option>
+        </select>
+      </div>
+      <div class="mb-3">
+        <label class="form-label fw-bold small">Trạng Thái Thanh Toán:</label>
+        <select id="filterThanhToan" class="form-select" onchange="filterData(); updateFilterCount();">
+          <option value="chua_thanh_toan" selected>Chưa thanh toán (Dưới 500k)</option>
+          <option value="da_thanh_toan_tren_500k">Đã thanh toán trên 500.000</option>
+          <option value="">Tất cả</option>
+        </select>
+      </div>
+      <div class="mb-3">
+        <label class="form-label fw-bold small">Khả Năng Thanh Toán:</label>
+        <select id="filterTrangThaiHd" class="form-select" onchange="filterData(); updateFilterCount();">
+          <option value="">Tất cả</option>
+          <option value="Chưa biết">Chưa biết</option>
+          <option value="Ăn Giựt">Ăn Giựt</option>
+          <option value="Mất khả năng TT">Mất khả năng TT</option>
+          <option value="Đang kẹt tiền">Đang kẹt tiền</option>
+          <option value="Có khả năng">Có khả năng</option>
+          <option value="Hẹn Thanh Toán">Hẹn Thanh Toán</option>
+          <option value="Nhiều khả năng(Hẹn)">Nhiều khả năng(Hẹn)</option>
+        </select>
+      </div>
+      <div class="mb-3">
+        <label class="form-label fw-bold small">Tìm nhà:</label>
+        <select id="filterTimNha" class="form-select" onchange="filterData(); updateFilterCount();">
+          <option value="">Tất cả</option>
+          <option value="Chưa tìm">Chưa tìm</option>
+          <option value="Đã tới Ấp">Đã tới Ấp</option>
+          <option value="Bỏ địa phương">Bỏ địa phương</option>
+          <option value="Có người biết">Có người biết</option>
+          <option value="Gặp người thân">Gặp người thân</option>
+          <option value="Gặp khách hàng">Gặp khách hàng</option>
+        </select>
+      </div>
+      <div class="mb-3">
+        <label class="form-label fw-bold small">Độ khó khách hàng:</label>
+        <select id="filterDoKho" class="form-select" onchange="filterData(); updateFilterCount();">
+          <option value="">Tất cả</option>
+          <option value="Dễ làm việc">Dễ làm việc</option>
+          <option value="Trung lập">Trung lập</option>
+          <option value="Khó Tính">Khó Tính</option>
+          <option value="Không hợp tác">Không hợp tác</option>
+          <option value="Bạo lực">Bạo lực</option>
+        </select>
+      </div>
+      <div class="mb-3">
+        <label class="form-label fw-bold small">🏠 Lọc theo Thường Trú:</label>
+        <input type="text" id="filterThuongTru" class="form-control" placeholder="Nhập tên xã, huyện, tỉnh..." oninput="filterData(); updateFilterCount();" />
+      </div>
+      <button class="btn btn-outline-danger w-100 mt-2" onclick="resetFilters()">🔄 Đặt lại bộ lọc</button>
+    </div>
+  </div>
+
+  <div id="toast-container"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="api.js"></script>
+  <script src="index.js"></script>
+</body>
+</html>
