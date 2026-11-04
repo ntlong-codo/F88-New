@@ -284,6 +284,7 @@ function filterData() {
   const thuongTru = (document.getElementById('filterThuongTru') || {}).value || '';
   const gpsFilterType = document.getElementById('gpsFilterType')?.value || 'all';
   const gpsFilterAp = window.appState.apFilterEnabled ? (document.getElementById('gpsFilterAp')?.value || 'all') : 'all';
+  const isRegularFilterActive = !window.appState.gpsFilterEnabled;
 
   const normalizedKeyword = keyword.trim().toLowerCase();
   let filtered = window.appState.allData.filter((customer) => {
@@ -291,42 +292,43 @@ function filterData() {
     const monthMatch = !selectedMonth || rowMonthValue === selectedMonth || normalizeMonthKey(customer['Kỳ'] || customer['Ky'] || '') === selectedMonth;
     if (!monthMatch) return false;
 
-    if (selectedCheck) {
-      const checkValue = String(customer.Check_GPS || customer['Check_GPS'] || '').trim();
-      const checkAoValue = String(customer.Check_Ao || customer['Check_Ao'] || '').trim();
-      if (selectedCheck === 'ChuaCheck' && (checkValue !== '' || checkAoValue !== '')) return false;
-      if (selectedCheck === 'DaCheckGps' && checkValue.toLowerCase().indexOf('gps') === -1) return false;
-      if (selectedCheck === 'DaCheckAo' && checkAoValue.toLowerCase().indexOf('áo') === -1 && checkAoValue.toLowerCase().indexOf('ao') === -1) return false;
+    if (isRegularFilterActive) {
+      if (selectedCheck) {
+        const checkValue = String(customer.Check_GPS || customer['Check_GPS'] || '').trim();
+        const checkAoValue = String(customer.Check_Ao || customer['Check_Ao'] || '').trim();
+        if (selectedCheck === 'ChuaCheck' && (checkValue !== '' || checkAoValue !== '')) return false;
+        if (selectedCheck === 'DaCheckGps' && checkValue.toLowerCase().indexOf('gps') === -1) return false;
+        if (selectedCheck === 'DaCheckAo' && checkAoValue.toLowerCase().indexOf('áo') === -1 && checkAoValue.toLowerCase().indexOf('ao') === -1) return false;
+      }
+
+      if (selectedGpsType && selectedGpsType !== 'all') {
+        const gpsValue = String(customer[selectedGpsType] || customer[selectedGpsType.toLowerCase()] || '').trim();
+        if (!gpsValue) return false;
+      }
+
+      if (selectedThanhToan) {
+        const amount = Number(customer.So_tien_thanh_toan || customer['So_tien_thanh_toan'] || 0);
+        if (selectedThanhToan === 'chua_thanh_toan' && amount >= 500000) return false;
+        if (selectedThanhToan === 'da_thanh_toan_tren_500k' && amount < 500000) return false;
+      }
+
+      if (selectedTrangThaiHd && String(customer.Trang_thai_hd || customer['Trang_thai_hd'] || '').trim() !== selectedTrangThaiHd) return false;
+      if (selectedTimNha && String(customer.Trang_thai_tim_nha || customer['Trang_thai_tim_nha'] || '').trim() !== selectedTimNha) return false;
+      if (selectedDoKho && String(customer.Muc_do_kho || customer['Muc_do_kho'] || '').trim() !== selectedDoKho) return false;
+
+      if (thuongTru) {
+        const haystack = [customer.WARD_HO_KHAU, customer.WARD_TAM_TRU, customer['WARD_HO_KHAU'], customer['WARD_TAM_TRU']].join(' ').toLowerCase();
+        if (haystack.indexOf(thuongTru.toLowerCase()) === -1) return false;
+      }
     }
 
-    const gpsFilterIsActive = window.appState.gpsFilterEnabled || (selectedGpsType && selectedGpsType !== 'all') || (gpsFilterType && gpsFilterType !== 'all');
-    if (gpsFilterIsActive && !hasAnyValidCustomerGps(customer)) {
-      return false;
-    }
-
-    if (selectedGpsType && selectedGpsType !== 'all') {
-      const gpsValue = String(customer[selectedGpsType] || customer[selectedGpsType.toLowerCase()] || '').trim();
-      if (!gpsValue) return false;
+    if (window.appState.gpsFilterEnabled || (gpsFilterType && gpsFilterType !== 'all')) {
+      if (!hasAnyValidCustomerGps(customer)) return false;
     }
 
     if (gpsFilterType && gpsFilterType !== 'all') {
       const gpsValue = String(customer[gpsFilterType] || customer[gpsFilterType.toLowerCase()] || '').trim();
       if (!gpsValue) return false;
-    }
-
-    if (selectedThanhToan) {
-      const amount = Number(customer.So_tien_thanh_toan || customer['So_tien_thanh_toan'] || 0);
-      if (selectedThanhToan === 'chua_thanh_toan' && amount >= 500000) return false;
-      if (selectedThanhToan === 'da_thanh_toan_tren_500k' && amount < 500000) return false;
-    }
-
-    if (selectedTrangThaiHd && String(customer.Trang_thai_hd || customer['Trang_thai_hd'] || '').trim() !== selectedTrangThaiHd) return false;
-    if (selectedTimNha && String(customer.Trang_thai_tim_nha || customer['Trang_thai_tim_nha'] || '').trim() !== selectedTimNha) return false;
-    if (selectedDoKho && String(customer.Muc_do_kho || customer['Muc_do_kho'] || '').trim() !== selectedDoKho) return false;
-
-    if (thuongTru) {
-      const haystack = [customer.WARD_HO_KHAU, customer.WARD_TAM_TRU, customer['WARD_HO_KHAU'], customer['WARD_TAM_TRU']].join(' ').toLowerCase();
-      if (haystack.indexOf(thuongTru.toLowerCase()) === -1) return false;
     }
 
     if (normalizedKeyword) {
@@ -567,7 +569,7 @@ function buildCustomerCardHtml(customer, index) {
         </div>
       </div>
 
-      <div class="collapse mt-3 pt-2 border-top" id="${infoCollapseId}">
+      <div class="collapse mt-3 pt-2 border-top d-none" id="${infoCollapseId}">
           <div class="d-flex justify-content-between align-items-start mb-2 gap-2">
             <div>
               <small class="text-muted">HĐ: <code>${escapeHtml(soHd)}</code></small>
@@ -642,7 +644,7 @@ function buildCustomerCardHtml(customer, index) {
         </div>
       </div>
 
-      <div class="collapse mt-2" id="${categoryCollapseId}">
+      <div class="collapse mt-2 d-none" id="${categoryCollapseId}">
         <div class="p-2 bg-light rounded border">
           <div class="row g-2">
             <div class="col-12">
@@ -683,7 +685,7 @@ function buildCustomerCardHtml(customer, index) {
         </div>
       </div>
 
-      <div class="collapse mt-2" id="${paymentCollapseId}">
+      <div class="collapse mt-2 d-none" id="${paymentCollapseId}">
         <div class="p-2 bg-light rounded border">
           <div class="small fw-bold text-success mb-2">💰 Thanh toán:</div>
           <div class="mb-2">
@@ -694,13 +696,13 @@ function buildCustomerCardHtml(customer, index) {
         </div>
       </div>
 
-      <div class="collapse mt-2" id="${checkCollapseId}">
+      <div class="collapse mt-2 d-none" id="${checkCollapseId}">
         <div class="p-2 bg-light rounded border">
           <div class="mb-3">
             <div class="small fw-bold mb-1 text-primary">⚡ Xác thực thực địa:</div>
             <div class="d-flex gap-2">
-              <button class="btn btn-sm text-white flex-fill" style="background-color: #6f42c1;" onclick="toggleCheckGpsDetails(${rowIndex}, true); doQuickCheckAo(${rowIndex}, '${String(soHd).replace(/'/g, "\\'")}')">🛡️ Check Áo</button>
-              <button class="btn btn-sm btn-success flex-fill" onclick="toggleCheckGpsDetails(${rowIndex}, true); doQuickCheckGps(${rowIndex}, '${String(soHd).replace(/'/g, "\\'")}')">📍 Check GPS</button>
+              <button class="btn btn-sm text-white flex-fill" style="background-color: #6f42c1;" onclick="doQuickCheckAo(${rowIndex}, '${String(soHd).replace(/'/g, "\\'")}')">🛡️ Check Áo</button>
+              <button class="btn btn-sm btn-success flex-fill" onclick="doQuickCheckGps(${rowIndex}, '${String(soHd).replace(/'/g, "\\'")}')">📍 Check GPS</button>
             </div>
           </div>
 
@@ -738,7 +740,9 @@ function toggleCheckGpsDetails(rowIndex, forceOpen) {
   const toggleButton = document.getElementById(`gpsToggle_${rowIndex}`);
   if (!box) return;
 
-  const shouldOpen = typeof forceOpen === 'boolean' ? forceOpen : box.classList.contains('d-none');
+  const isHidden = box.classList.contains('d-none');
+  const shouldOpen = typeof forceOpen === 'boolean' ? forceOpen : isHidden;
+
   box.classList.toggle('d-none', !shouldOpen);
 
   if (toggleButton) {
@@ -917,30 +921,41 @@ async function saveQuickGps(rowIndex, inputId, fieldName) {
   }
 }
 
+function closeNestedGpsDetailsForRow(rowIndex) {
+  const details = document.getElementById(`gpsDetails_${rowIndex}`);
+  const toggleButton = document.getElementById(`gpsToggle_${rowIndex}`);
+  if (details) details.classList.add('d-none');
+  if (toggleButton) toggleButton.classList.remove('d-none');
+}
+
 function toggleCardSection(activeId, allIds) {
   const ids = Array.isArray(allIds) ? allIds : [allIds];
+  const rowMatch = activeId.match(/_(\d+)$/);
+  const rowIndex = rowMatch ? rowMatch[1] : null;
+
+  if (rowIndex) {
+    closeNestedGpsDetailsForRow(rowIndex);
+  }
+
   ids.forEach((id) => {
     const el = document.getElementById(id);
     if (!el) return;
     const instance = window.bootstrap && window.bootstrap.Collapse ? window.bootstrap.Collapse.getOrCreateInstance(el) : null;
-    if (instance) {
-      if (id === activeId) {
-        if (el.classList.contains('show')) {
-          instance.hide();
-        } else {
-          instance.show();
-        }
+    const isOpen = !el.classList.contains('d-none') || el.classList.contains('show');
+
+    if (id === activeId) {
+      if (isOpen) {
+        el.classList.add('d-none');
+        if (instance) instance.hide();
       } else {
-        instance.hide();
+        el.classList.remove('d-none');
+        if (instance) instance.show();
       }
       return;
     }
 
-    if (id === activeId) {
-      el.classList.remove('d-none');
-    } else {
-      el.classList.add('d-none');
-    }
+    el.classList.add('d-none');
+    if (instance) instance.hide();
   });
 }
 

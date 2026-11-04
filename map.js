@@ -7,7 +7,8 @@ window.mapState = {
   selectedMonth: '',
   myLocation: null,
   markerRegistry: {},
-  sidebarVisible: true
+  sidebarVisible: true,
+  focusedCustomerRow: null
 };
 
 function toggleMapSidebar(forceVisible) {
@@ -29,6 +30,27 @@ function toggleMapSidebar(forceVisible) {
     }, 220);
   }
 }
+
+function setCustomerFocus(rowIndex, shouldFocus = true) {
+  const targetRow = Number(rowIndex);
+  if (!Number.isFinite(targetRow) || targetRow <= 0) {
+    window.mapState.focusedCustomerRow = null;
+    renderMapMarkers(window.mapState.filteredData || []);
+    showToast('Đã hiện lại tất cả khách hàng trên bản đồ.', 'info');
+    return;
+  }
+
+  window.mapState.focusedCustomerRow = shouldFocus ? targetRow : null;
+  const renderList = Array.isArray(window.mapState.filteredData) ? window.mapState.filteredData : [];
+  const visibleData = window.mapState.focusedCustomerRow === null
+    ? renderList
+    : renderList.filter((customer) => Number(customer.rowIndex || customer['rowIndex'] || 0) === targetRow);
+
+  renderMapMarkers(visibleData);
+  showToast(shouldFocus ? 'Đã chỉ hiển thị khách hàng này trên bản đồ.' : 'Đã hiện lại tất cả khách hàng trên bản đồ.', 'info');
+}
+
+window.setCustomerFocus = setCustomerFocus;
 
 function normalizeMonthKey(value) {
   const text = String(value || '').trim();
@@ -129,9 +151,34 @@ function getGpsFieldsInPriorityOrder() {
   ];
 }
 
-function getPreferredGpsValue(customer) {
-  const keys = getGpsFieldsInPriorityOrder();
+function getNearestGpsEntry(customer) {
+  const entries = getCustomerGpsEntries(customer);
+  if (!entries.length) return null;
 
+  return [...entries].sort((a, b) => {
+    if (a.distanceKm == null && b.distanceKm == null) return 0;
+    if (a.distanceKm == null) return 1;
+    if (b.distanceKm == null) return -1;
+    return a.distanceKm - b.distanceKm;
+  })[0];
+}
+
+function getPreferredGpsValue(customer) {
+  const explicitPriorityKey = getObjectValueByAnyKey(customer, ['Gps_Uu_Tien', 'gps_uu_tien', 'GPS_UU_TIEN']) || '';
+  if (explicitPriorityKey) {
+    const value = getObjectValueByAnyKey(customer, [
+      explicitPriorityKey,
+      explicitPriorityKey.toLowerCase(),
+      explicitPriorityKey.replace(/_/g, ''),
+      explicitPriorityKey.replace(/_/g, '').toLowerCase()
+    ]);
+    if (value) return value;
+  }
+
+  const nearestEntry = getNearestGpsEntry(customer);
+  if (nearestEntry) return nearestEntry.raw;
+
+  const keys = getGpsFieldsInPriorityOrder();
   for (const key of keys) {
     const value = getObjectValueByAnyKey(customer, [
       key,
@@ -566,24 +613,46 @@ function renderMapMarkers(data) {
   window.mapState.markersLayer.clearLayers();
   window.mapState.markerRegistry = {};
 
+  const visibleData = window.mapState.focusedCustomerRow === null
+    ? data
+    : data.filter((customer) => Number(customer.rowIndex || customer['rowIndex'] || 0) === Number(window.mapState.focusedCustomerRow));
+
   const pool = [];
-  data.forEach((customer, index) => {
-    const gpsValue = getPreferredGpsValue(customer);
-    const coords = parseGpsCoord(gpsValue);
-    if (!coords) return;
+  visibleData.forEach((customer, index) => {
+    const gpsEntries = getCustomerGpsEntries(customer);
+    if (!gpsEntries.length) return;
 
-    const tone = computeCustomerStatusTone(customer);
-    const marker = L.marker([coords.lat, coords.lng], {
-      icon: getCustomerMarkerIcon(customer, index)
-    }).addTo(window.mapState.markersLayer);
+    const primaryEntry = getNearestGpsEntry(customer);
+    gpsEntries.forEach((entry, entryIndex) => {
+      const isPrimary = primaryEntry && entry.key === primaryEntry.key && entry.raw === primaryEntry.raw;
+      const markerIcon = L.divIcon({
+        className: 'gps-marker-num',
+        html: `<span style="background:${isPrimary ? '#0d6efd' : '#6c757d'}; color: white; display:inline-flex; width:22px; height:22px; border-radius:50%; align-items:center; justify-content:center; border:2px solid rgba(255,255,255,0.9); box-shadow:0 4px 12px rgba(0,0,0,0.25); font-weight:700; font-size:10px;">${entry.label.replace(/[^A-Z]/gi, '').slice(0, 1) || (entryIndex + 1)}</span>`,
+        iconSize: [22, 22],
+        iconAnchor: [11, 11]
+      });
 
-    const markerKey = getCustomerMarkerKey(customer);
-    window.mapState.markerRegistry[markerKey] = marker;
-    marker.bindPopup(buildCustomerPopupHtml(customer));
-    pool.push({ customer, marker });
+      const marker = L.marker([entry.coords.lat, entry.coords.lng], {
+        icon: markerIcon
+      }).addTo(window.mapState.markersLayer);
+
+      const markerKey = `${getCustomerMarkerKey(customer)}-${entry.key}`;
+      window.mapState.markerRegistry[markerKey] = marker;
+      marker.bindPopup(`
+        <div style="min-width:220px; max-width:260px;">
+          <div class="fw-bold text-primary mb-2">${escapeHtml(getObjectValueByAnyKey(customer, ['Ten_khach_hang', 'ten_khach_hang']) || 'Khách hàng')}</div>
+          <div class="mb-1"><strong>${escapeHtml(entry.label)}:</strong> ${escapeHtml(entry.raw)}</div>
+          <div class="mb-1"><strong>Khoảng cách:</strong> ${entry.distanceKm !== null ? `${entry.distanceKm.toFixed(1)} km` : 'Không xác định'}</div>
+          <div class="mt-2">
+            <button type="button" class="btn btn-sm btn-primary" onclick="window.focusCustomerGps(${customer.rowIndex || customer['rowIndex'] || index + 2}, '${entry.key}')">Mở vị trí</button>
+          </div>
+        </div>
+      `);
+      pool.push({ customer, marker });
+    });
   });
 
-  document.getElementById('statCustomers').textContent = String(data.length);
+  document.getElementById('statCustomers').textContent = String(visibleData.length);
   document.getElementById('statGpsPoints').textContent = String(pool.length);
 
   const listNode = document.getElementById('sidebarCustomerList');
@@ -603,6 +672,9 @@ function renderMapMarkers(data) {
       const kmText = getCustomerDistanceText(customer);
       const tone = computeCustomerStatusTone(customer);
       const detailId = `mapCustomerDetail_${rowIndex}_${index}`;
+      const focused = Number(window.mapState.focusedCustomerRow) === Number(rowIndex);
+      const focusButtonLabel = focused ? 'Hiện tất cả' : 'Chỉ khách này';
+      const focusButtonAction = focused ? `setCustomerFocus(${rowIndex}, false)` : `setCustomerFocus(${rowIndex}, true)`;
       return `
         <div class="customer-item-card" data-index="${index}" data-status="${tone.key}">
           <div class="customer-summary-row" onclick="toggleMapCustomerDetails('${detailId}')">
@@ -623,6 +695,7 @@ function renderMapMarkers(data) {
 
             <div class="customer-action-row">
               <button class="btn btn-sm btn-outline-primary" onclick="event.stopPropagation(); panToMapCustomer(${rowIndex})">👁️ Xem</button>
+              <button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); ${focusButtonAction}">${focused ? '📌' : '👁️'} ${focusButtonLabel}</button>
               <button class="btn btn-sm btn-success" onclick="event.stopPropagation(); doMapCustomerCheckGps(${rowIndex}, '${escapeHtml(soHd)}')">📍 Check GPS</button>
               <button class="btn btn-sm btn-warning text-white" onclick="event.stopPropagation(); doMapCustomerCheckAo(${rowIndex}, '${escapeHtml(soHd)}')">🛡️ Check Áo</button>
             </div>
