@@ -31,7 +31,6 @@
       const url = this.buildUrl(action, params || {});
       const response = await fetch(url, {
         method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
         ...(options || {})
       });
 
@@ -46,7 +45,6 @@
     async post(action, payload) {
       const response = await fetch(this.baseUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action, ...payload })
       });
 
