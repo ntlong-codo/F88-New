@@ -294,10 +294,17 @@
         📊 Tổng khách: <span id="statCustomers" class="text-primary">0</span> |
         📌 Tổng điểm GPS: <span id="statGpsPoints" class="text-success">0</span>
       </div>
-      <div class="d-flex gap-1 flex-wrap">
-        <a href="index.html" class="btn btn-primary btn-sm fw-bold">📋 Danh sách</a>
-        <a href="ap.html" class="btn btn-warning btn-sm fw-bold">🏡 Đồng Bộ</a>
-        <a href="payment.html" class="btn btn-success btn-sm fw-bold">💰 Thanh toán</a>
+      <div class="d-flex gap-1 flex-wrap align-items-center">
+        <div class="dropdown">
+          <button class="btn btn-primary btn-sm fw-bold dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+            ☰ Menu
+          </button>
+          <ul class="dropdown-menu dropdown-menu-end shadow-sm border-0">
+            <li><a class="dropdown-item" href="index.html">📋 Danh sách</a></li>
+            <li><a class="dropdown-item" href="ap.html">🏡 Đồng Bộ</a></li>
+            <li><a class="dropdown-item" href="payment.html">� Khách nguồn</a></li>
+          </ul>
+        </div>
         <button id="toggleMapListBtn" class="btn btn-outline-primary btn-sm fw-bold d-lg-none" onclick="toggleMapSidebar()">☰ Ẩn danh sách</button>
         <button class="btn btn-danger btn-sm fw-bold" onclick="locateMyPosition()">📍 Định Vị Lại</button>
         <button id="loadMapBtn" class="btn btn-success btn-sm fw-bold" onclick="loadMapDataAndRender()">🔄 Tải Dữ Liệu</button>
