@@ -326,24 +326,71 @@ function getCustomerDistanceText(customer) {
   return `${distanceKm.toFixed(1)} km`;
 }
 
+function getStatusToneByValue(value, type) {
+  const safeValue = String(value || '').trim();
+  if (!safeValue || safeValue === 'Chưa tìm' || safeValue === 'Chưa biết') return null;
+
+  const toneMap = {
+    timNha: {
+      'Đã tới Ấp': { key: 'tim-nha-1', label: 'Đã tới Ấp', color: '#f59e0b', light: '#fff7e6', text: '#b7791f' },
+      'Bỏ địa phương': { key: 'tim-nha-2', label: 'Bỏ địa phương', color: '#dc3545', light: '#ffe4e6', text: '#b42318' },
+      'Có người biết': { key: 'tim-nha-3', label: 'Có người biết', color: '#0ea5e9', light: '#e0f2fe', text: '#0369a1' },
+      'Gặp người thân': { key: 'tim-nha-4', label: 'Gặp người thân', color: '#8b5cf6', light: '#f3e8ff', text: '#6d28d9' },
+      'Gặp khách hàng': { key: 'tim-nha-5', label: 'Gặp khách hàng', color: '#10b981', light: '#d1fae5', text: '#047857' }
+    },
+    hd: {
+      'Ăn Giựt': { key: 'hd-1', label: 'Ăn Giựt', color: '#dc3545', light: '#ffe4e6', text: '#b42318' },
+      'Mất khả năng TT': { key: 'hd-2', label: 'Mất khả năng TT', color: '#dc3545', light: '#ffe4e6', text: '#b42318' },
+      'Đang kẹt tiền': { key: 'hd-3', label: 'Đang kẹt tiền', color: '#f59e0b', light: '#fff7e6', text: '#b7791f' },
+      'Có khả năng': { key: 'hd-4', label: 'Có khả năng', color: '#10b981', light: '#d1fae5', text: '#047857' },
+      'Hẹn Thanh Toán': { key: 'hd-5', label: 'Hẹn Thanh Toán', color: '#0ea5e9', light: '#e0f2fe', text: '#0369a1' },
+      'Nhiều khả năng(Hẹn)': { key: 'hd-6', label: 'Nhiều khả năng(Hẹn)', color: '#8b5cf6', light: '#f3e8ff', text: '#6d28d9' }
+    },
+    doKho: {
+      'Dễ làm việc': { key: 'do-kho-1', label: 'Dễ làm việc', color: '#10b981', light: '#d1fae5', text: '#047857' },
+      'Trung lập': { key: 'do-kho-2', label: 'Trung lập', color: '#f59e0b', light: '#fff7e6', text: '#b7791f' },
+      'Khó Tính': { key: 'do-kho-3', label: 'Khó Tính', color: '#f97316', light: '#ffedd5', text: '#c2410c' },
+      'Không hợp tác': { key: 'do-kho-4', label: 'Không hợp tác', color: '#dc3545', light: '#ffe4e6', text: '#b42318' },
+      'Bạo lực': { key: 'do-kho-5', label: 'Bạo lực', color: '#111827', light: '#e5e7eb', text: '#111827' }
+    }
+  };
+
+  return toneMap[type]?.[safeValue] || null;
+}
+
+function computeCustomerStatusTone(customer) {
+  const candidates = [
+    { value: getObjectValueByAnyKey(customer, ['Trang_thai_hd', 'trang_thai_hd']), type: 'hd' },
+    { value: getObjectValueByAnyKey(customer, ['Muc_do_kho', 'muc_do_kho']), type: 'doKho' }
+  ];
+
+  for (const item of candidates) {
+    const tone = getStatusToneByValue(item.value, item.type);
+    if (tone) return tone;
+  }
+
+  return computeCustomerGpsTone(customer);
+}
+
 function computeCustomerGpsTone(customer) {
   const entries = getCustomerGpsEntries(customer);
   if (!entries.length) {
     return { key: 'gps-none', label: 'Chưa có GPS', color: '#dc3545', light: '#fff1f2', text: '#b42318' };
   }
 
+  const distanceText = window.mapState.myLocation ? getCustomerDistanceText(customer) : null;
   const firstKey = entries[0].key;
   if (firstKey === 'GPS_Chinh') {
-    return { key: 'gps-main', label: 'GPS chính', color: '#0d6efd', light: '#edf4ff', text: '#0b4bbf' };
+    return { key: 'gps-main', label: distanceText || 'GPS chính', color: '#0d6efd', light: '#edf4ff', text: '#0b4bbf' };
   }
   if (firstKey.startsWith('GPS_')) {
-    return { key: 'gps-check', label: 'GPS check', color: '#198754', light: '#ebfff4', text: '#12714a' };
+    return { key: 'gps-check', label: distanceText || 'GPS check', color: '#198754', light: '#ebfff4', text: '#12714a' };
   }
-  return { key: 'gps-ap', label: 'GPS ấp', color: '#f59e0b', light: '#fff7e6', text: '#b7791f' };
+  return { key: 'gps-ap', label: distanceText || 'GPS ấp', color: '#f59e0b', light: '#fff7e6', text: '#b7791f' };
 }
 
 function getCustomerMarkerIcon(customer, index) {
-  const tone = computeCustomerGpsTone(customer);
+  const tone = computeCustomerStatusTone(customer);
   return L.divIcon({
     className: 'gps-marker-num',
     html: `<span style="background:${tone.color}; color: white; display:inline-flex; width:28px; height:28px; border-radius:50%; align-items:center; justify-content:center; border:2px solid rgba(255,255,255,0.9); box-shadow:0 4px 12px rgba(0,0,0,0.25); font-weight:800; font-size:11px;">${index + 1}</span>`,
@@ -501,6 +548,20 @@ function filterAndRenderMap() {
   renderMapMarkers(window.mapState.filteredData);
 }
 
+function toggleMapCustomerDetails(panelId) {
+  const panel = document.getElementById(panelId);
+  if (!panel) return;
+
+  const isHidden = panel.classList.contains('d-none');
+  panel.classList.toggle('d-none', !isHidden);
+
+  const card = panel.closest('.customer-item-card');
+  const toggle = card?.querySelector('.map-card-toggle');
+  if (toggle) {
+    toggle.textContent = isHidden ? '▴' : '▾';
+  }
+}
+
 function renderMapMarkers(data) {
   window.mapState.markersLayer.clearLayers();
   window.mapState.markerRegistry = {};
@@ -511,7 +572,7 @@ function renderMapMarkers(data) {
     const coords = parseGpsCoord(gpsValue);
     if (!coords) return;
 
-    const tone = computeCustomerGpsTone(customer);
+    const tone = computeCustomerStatusTone(customer);
     const marker = L.marker([coords.lat, coords.lng], {
       icon: getCustomerMarkerIcon(customer, index)
     }).addTo(window.mapState.markersLayer);
@@ -531,38 +592,40 @@ function renderMapMarkers(data) {
       const gpsEntries = getCustomerGpsEntries(customer);
       const gpsText = gpsEntries.length ? gpsEntries.map((entry) => {
         const distLabel = entry.distanceKm !== null ? ` • ${entry.distanceKm.toFixed(1)} km` : '';
-        return `<div class="gps-mini-row"><span class="gps-mini-label">${escapeHtml(entry.label)}:</span> <span class="gps-mini-value">${escapeHtml(entry.raw)}</span><button class="gps-mini-action" type="button" onclick="focusCustomerGps(${customer.rowIndex || customer['rowIndex'] || index + 2}, '${entry.key}')">Mở vị trí</button>${distLabel}</div>`;
+        return `<div class="gps-mini-row"><span class="gps-mini-label">${escapeHtml(entry.label)}:</span> <span class="gps-mini-value">${escapeHtml(entry.raw)}</span><button class="gps-mini-action" type="button" onclick="event.stopPropagation(); focusCustomerGps(${customer.rowIndex || customer['rowIndex'] || index + 2}, '${entry.key}')">Mở vị trí</button>${distLabel}</div>`;
       }).join('') : '<div class="text-muted small">Chưa có GPS</div>';
 
       const name = getObjectValueByAnyKey(customer, ['Ten_khach_hang', 'ten_khach_hang', 'TEN_KHACH_HANG']) || 'Khách hàng';
-      const phone = getObjectValueByAnyKey(customer, ['sdt', 'SDT']) || '---';
+      const ap = getObjectValueByAnyKey(customer, ['WARD_HO_KHAU_AP_NEW', 'WARD_HO_KHAU_AP_OLD', 'ward_ho_khau_ap_new', 'ward_ho_khau_ap_old']) || getObjectValueByAnyKey(customer, ['Ap', 'ap']) || '---';
+      const xa = getObjectValueByAnyKey(customer, ['WARD_HO_KHAU', 'WARD_TAM_TRU', 'ward_ho_khau', 'ward_tam_tru', 'Xa', 'xa', 'xaphuong']) || '---';
       const soHd = getObjectValueByAnyKey(customer, ['so_hd', 'SO_HD', 'sohd']) || '---';
       const rowIndex = customer.rowIndex || customer['rowIndex'] || index + 2;
-      const checkGpsStatus = String(getObjectValueByAnyKey(customer, ['Check_GPS', 'check_gps']) || '').trim();
-      const checkAoStatus = String(getObjectValueByAnyKey(customer, ['Check_Ao', 'check_ao']) || '').trim();
       const kmText = getCustomerDistanceText(customer);
-      const tone = computeCustomerGpsTone(customer);
+      const tone = computeCustomerStatusTone(customer);
+      const detailId = `mapCustomerDetail_${rowIndex}_${index}`;
       return `
         <div class="customer-item-card" data-index="${index}" data-status="${tone.key}">
-          <div class="customer-head">
-            <div>
+          <div class="customer-summary-row" onclick="toggleMapCustomerDetails('${detailId}')">
+            <div class="customer-summary-main">
               <p class="customer-name">${escapeHtml(name)}</p>
-              <div class="customer-phone">${escapeHtml(soHd)} | ${escapeHtml(phone)}</div>
+              <div class="customer-phone">${escapeHtml(ap)} • ${escapeHtml(xa)}</div>
             </div>
-            <div class="d-flex flex-column align-items-end gap-1">
-              <div class="gps-status-badge" style="background:${tone.light}; color:${tone.text}; border:1px solid ${tone.color}55;">${escapeHtml(tone.label)}</div>
+            <div class="customer-summary-side">
               <div class="distance-pill">📍 ${escapeHtml(kmText)}</div>
+              <div class="map-card-toggle">▾</div>
             </div>
           </div>
 
-          <div class="customer-meta">
-            <div class="gps-mini-box">${gpsText}</div>
-          </div>
+          <div id="${detailId}" class="customer-detail-panel d-none">
+            <div class="customer-meta">
+              <div class="gps-mini-box">${gpsText}</div>
+            </div>
 
-          <div class="customer-action-row">
-            <button class="btn btn-sm btn-outline-primary" onclick="panToMapCustomer(${rowIndex})">👁️ Xem</button>
-            <button class="btn btn-sm btn-success" onclick="doMapCustomerCheckGps(${rowIndex}, '${escapeHtml(soHd)}')">📍 Check GPS</button>
-            <button class="btn btn-sm btn-warning text-white" onclick="doMapCustomerCheckAo(${rowIndex}, '${escapeHtml(soHd)}')">🛡️ Check Áo</button>
+            <div class="customer-action-row">
+              <button class="btn btn-sm btn-outline-primary" onclick="event.stopPropagation(); panToMapCustomer(${rowIndex})">👁️ Xem</button>
+              <button class="btn btn-sm btn-success" onclick="event.stopPropagation(); doMapCustomerCheckGps(${rowIndex}, '${escapeHtml(soHd)}')">📍 Check GPS</button>
+              <button class="btn btn-sm btn-warning text-white" onclick="event.stopPropagation(); doMapCustomerCheckAo(${rowIndex}, '${escapeHtml(soHd)}')">🛡️ Check Áo</button>
+            </div>
           </div>
         </div>
       `;

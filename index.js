@@ -414,94 +414,178 @@ function updateStats(data) {
   document.getElementById('statMonthName').textContent = formatMonthLabel(window.appState.selectedMonth || '');
 }
 
-function renderCards(data) {
-  const container = document.getElementById('customerCardContainer');
-  if (!container) return;
+function getCustomerRowKey(customer) {
+  const value = customer && (customer.rowIndex ?? customer['rowIndex']);
+  const rowIndex = Number(value ?? 0);
+  return Number.isFinite(rowIndex) && rowIndex > 0 ? rowIndex : 0;
+}
 
-  if (!data || !data.length) {
-    container.innerHTML = '<div class="text-center py-5 text-muted bg-white rounded shadow-sm">Không có dữ liệu phù hợp với bộ lọc.</div>';
-    return;
+function findCustomerByRowIndex(rowIndex) {
+  const targetRow = Number(rowIndex);
+  const lists = [];
+  if (Array.isArray(window.appState.filteredData)) lists.push(window.appState.filteredData);
+  if (Array.isArray(window.appState.allData)) lists.push(window.appState.allData);
+
+  for (const list of lists) {
+    const match = list.find((customer) => getCustomerRowKey(customer) === targetRow);
+    if (match) return match;
   }
+  return null;
+}
 
+function updateCustomerState(rowIndex, patch) {
+  const targetRow = Number(rowIndex);
+  if (!targetRow) return false;
+
+  let changed = false;
+  const applyPatch = (list) => {
+    if (!Array.isArray(list)) return false;
+    const item = list.find((customer) => getCustomerRowKey(customer) === targetRow);
+    if (!item) return false;
+    Object.entries(patch).forEach(([key, value]) => {
+      item[key] = value;
+    });
+    changed = true;
+    return true;
+  };
+
+  applyPatch(window.appState.filteredData);
+  applyPatch(window.appState.allData);
+  return changed;
+}
+
+function getCurrentMonthTabName() {
+  const raw = window.appState.selectedMonth || document.getElementById('filterMonth')?.value || document.getElementById('gpsFilterMonth')?.value || '';
+  return normalizeMonthKey(raw) || 'data';
+}
+
+function refreshSingleCustomerCard(rowIndex) {
+  const targetRow = Number(rowIndex);
+  const list = Array.isArray(window.appState.filteredData) && window.appState.filteredData.length ? window.appState.filteredData : window.appState.allData;
+  const customer = list && list.find((item) => getCustomerRowKey(item) === targetRow);
+  if (!customer) return false;
+
+  const card = document.querySelector(`.customer-card[data-customer-row="${targetRow}"]`);
+  if (!card) return false;
+
+  const index = list.findIndex((item) => getCustomerRowKey(item) === targetRow);
+  card.outerHTML = buildCustomerCardHtml(customer, index >= 0 ? index : 0);
+  return true;
+}
+
+function getStatusBadgeClass(value, type) {
+  const safeValue = String(value || '').trim();
+  if (!safeValue || safeValue === 'Chưa tìm' || safeValue === 'Chưa biết') return '';
+
+  const lookup = {
+    timNha: {
+      'Đã tới Ấp': 'bg-warning text-dark',
+      'Bỏ địa phương': 'bg-danger',
+      'Có người biết': 'bg-info',
+      'Gặp người thân': 'bg-primary',
+      'Gặp khách hàng': 'bg-success'
+    },
+    hd: {
+      'Ăn Giựt': 'bg-danger',
+      'Mất khả năng TT': 'bg-danger',
+      'Đang kẹt tiền': 'bg-warning text-dark',
+      'Có khả năng': 'bg-success',
+      'Hẹn Thanh Toán': 'bg-info',
+      'Nhiều khả năng(Hẹn)': 'bg-primary'
+    },
+    doKho: {
+      'Dễ làm việc': 'bg-success',
+      'Trung lập': 'bg-warning text-dark',
+      'Khó Tính': 'bg-orange text-dark',
+      'Không hợp tác': 'bg-danger',
+      'Bạo lực': 'bg-dark'
+    }
+  };
+
+  return (lookup[type] || {})[safeValue] || 'bg-secondary';
+}
+
+function getCustomerCategoryBadges(customer) {
+  const badges = [];
+  const timNha = String(customer.Trang_thai_tim_nha || customer['Trang_thai_tim_nha'] || '').trim();
+  const hd = String(customer.Trang_thai_hd || customer['Trang_thai_hd'] || '').trim();
+  const doKho = String(customer.Muc_do_kho || customer['Muc_do_kho'] || '').trim();
+
+  if (timNha && timNha !== 'Chưa tìm') badges.push({ label: timNha, className: getStatusBadgeClass(timNha, 'timNha') });
+  if (hd && hd !== 'Chưa biết') badges.push({ label: hd, className: getStatusBadgeClass(hd, 'hd') });
+  if (doKho && doKho !== 'Chưa biết') badges.push({ label: doKho, className: getStatusBadgeClass(doKho, 'doKho') });
+
+  return badges;
+}
+
+function buildCustomerCardHtml(customer, index) {
+  const name = customer.Ten_khach_hang || customer['Ten_khach_hang'] || 'Khách hàng';
+  const soHd = customer.so_hd || customer['so_hd'] || '---';
+  const phone = customer.sdt || customer['sdt'] || '---';
+  const rowIndex = getCustomerRowKey(customer) || Number(customer.rowIndex || customer['rowIndex'] || index + 2);
+  const paidStr = customer.So_tien_thanh_toan ? Number(customer.So_tien_thanh_toan).toLocaleString() + ' VNĐ' : 'Chưa';
+  const ngayQuaHan = customer.Ngay_qua_han !== undefined && customer.Ngay_qua_han !== '' ? customer.Ngay_qua_han : '---';
+  const checkCount = Number(customer.So_lan_check) || (customer.Check_GPS === 'Đã Check GPS' || customer.Check_Ao === 'Đã Check Áo' ? 1 : 0);
+  const checkGps = String(customer.Check_GPS || customer['Check_GPS'] || '').trim();
+  const checkAo = String(customer.Check_Ao || customer['Check_Ao'] || '').trim();
+  const nearestKm = getCustomerDistanceKm(customer);
+  const apNearText = nearestKm !== null ? `📍 ${nearestKm.toFixed(1)} km` : '📍 Không có GPS';
   const currentMonth = window.appState.selectedMonth || document.getElementById('filterMonth')?.value || document.getElementById('gpsFilterMonth')?.value || 'Tất cả';
   const nearestApFilterValue = window.appState.apFilterEnabled ? (document.getElementById('gpsFilterAp')?.value || 'all') : 'all';
+  const summaryAddress = [customer.WARD_HO_KHAU || customer['WARD_HO_KHAU'], customer.WARD_TAM_TRU || customer['WARD_TAM_TRU']].filter(Boolean).join(' • ') || 'Chưa có địa chỉ';
+  const categoryBadges = getCustomerCategoryBadges(customer);
+  const noteText = String(customer.Ghi_chu || customer['Ghi_chu'] || '').trim();
+  const noteBadgeHtml = noteText ? `<div class="mt-1"><span class="badge bg-success-subtle text-success border border-success-subtle">📝 ${escapeHtml(noteText.length > 38 ? noteText.slice(0, 38) + '...' : noteText)}</span></div>` : '';
+  let rowClass = '';
+  if (checkAo.toLowerCase().indexOf('ao') !== -1 || checkAo.toLowerCase().indexOf('áo') !== -1) rowClass = 'row-check-ao';
+  if (checkGps.toLowerCase().indexOf('gps') !== -1) rowClass = 'row-check-gps';
+  if (nearestApFilterValue !== 'all' && window.appState.currentLocation) {
+    rowClass += ' border border-warning';
+  }
+  const collapseId = 'collapseCard_' + rowIndex;
+  const infoCollapseId = 'infoCard_' + rowIndex;
+  const checkCollapseId = 'checkCard_' + rowIndex;
+  const categoryCollapseId = 'categoryCard_' + rowIndex;
+  const paymentCollapseId = 'paymentCard_' + rowIndex;
 
-  const cards = data.map((customer, index) => {
-    const name = customer.Ten_khach_hang || customer['Ten_khach_hang'] || 'Khách hàng';
-    const soHd = customer.so_hd || customer['so_hd'] || '---';
-    const phone = customer.sdt || customer['sdt'] || '---';
-    const rowIndex = customer.rowIndex || customer['rowIndex'] || index + 2;
-    const paidStr = customer.So_tien_thanh_toan ? Number(customer.So_tien_thanh_toan).toLocaleString() + ' VNĐ' : 'Chưa';
-    const ngayQuaHan = customer.Ngay_qua_han !== undefined && customer.Ngay_qua_han !== '' ? customer.Ngay_qua_han : '---';
-    const checkCount = Number(customer.So_lan_check) || (customer.Check_GPS === 'Đã Check GPS' || customer.Check_Ao === 'Đã Check Áo' ? 1 : 0);
-    const checkGps = String(customer.Check_GPS || customer['Check_GPS'] || '').trim();
-    const checkAo = String(customer.Check_Ao || customer['Check_Ao'] || '').trim();
-    const nearestKm = getCustomerDistanceKm(customer);
-    const apNearText = nearestKm !== null ? `📍 ${nearestKm.toFixed(1)} km` : '📍 Không có GPS';
-    let rowClass = '';
-    if (checkAo.toLowerCase().indexOf('ao') !== -1 || checkAo.toLowerCase().indexOf('áo') !== -1) rowClass = 'row-check-ao';
-    if (checkGps.toLowerCase().indexOf('gps') !== -1) rowClass = 'row-check-gps';
-    if (nearestApFilterValue !== 'all' && window.appState.currentLocation) {
-      rowClass += ' border border-warning';
-    }
-    const collapseId = 'collapseCard_' + rowIndex;
-
-    return `
-      <div class="customer-card ${rowClass}">
-        <div class="d-flex justify-content-between align-items-start mb-2 gap-2">
-          <div>
-            <h6 class="fw-bold text-primary mb-1">${escapeHtml(name)}</h6>
-            <small class="text-muted">HĐ: <code>${escapeHtml(soHd)}</code></small>
-            <button class="btn btn-sm btn-link p-0 ms-1" onclick="navigator.clipboard.writeText('${String(soHd).replace(/'/g, "\\'")}').then(() => showToast('Đã copy: ${String(soHd).replace(/'/g, "\\'")}', 'success'))">📋</button>
+  return `
+    <div class="customer-card ${rowClass}" data-customer-row="${rowIndex}">
+      <div class="d-flex justify-content-between align-items-start gap-2">
+        <div class="flex-grow-1 min-w-0">
+          <div class="d-flex align-items-center gap-2 flex-wrap">
+            <div class="fw-bold text-primary mb-0">${escapeHtml(name)}</div>
+            ${categoryBadges.length ? categoryBadges.map((badge) => `<span class="badge ${badge.className} rounded-pill small">${escapeHtml(badge.label)}</span>`).join('') : ''}
           </div>
-          <div style="width: 160px;">
-            <select class="form-select form-select-sm fw-bold border-primary" onchange="updateFieldAndNotify(${rowIndex}, 'Trang_thai_tim_nha', this.value)">
-              <option value="Chưa tìm" ${customer.Trang_thai_tim_nha === 'Chưa tìm' ? 'selected' : ''}>⚪ Chưa tìm</option>
-              <option value="Đã tới Ấp" ${customer.Trang_thai_tim_nha === 'Đã tới Ấp' ? 'selected' : ''}>🟡 Đã tới Ấp</option>
-              <option value="Bỏ địa phương" ${customer.Trang_thai_tim_nha === 'Bỏ địa phương' ? 'selected' : ''}>🔴 Bỏ địa phương</option>
-              <option value="Có người biết" ${customer.Trang_thai_tim_nha === 'Có người biết' ? 'selected' : ''}>🔵 Có người biết</option>
-              <option value="Gặp người thân" ${customer.Trang_thai_tim_nha === 'Gặp người thân' ? 'selected' : ''}>🟣 Gặp người thân</option>
-              <option value="Gặp khách hàng" ${customer.Trang_thai_tim_nha === 'Gặp khách hàng' ? 'selected' : ''}>🟢 Gặp khách hàng</option>
-            </select>
-          </div>
+          ${noteBadgeHtml}
+          <div class="text-secondary small text-truncate">${escapeHtml(summaryAddress)}</div>
         </div>
-
-        <div class="row g-2 mb-2">
-          <div class="col-12 text-secondary small">
-            📞 SĐT: <b>${escapeHtml(phone)}</b> | Kỳ: <b>${escapeHtml(currentMonth)}</b><br>
-            ⏰ Quá hạn: <b class="text-danger">${escapeHtml(ngayQuaHan)} ngày</b> | 📊 Lượt check: <b class="text-success">${checkCount} lần</b> | ${apNearText}
-          </div>
-          <div class="col-6">
-            <label class="small text-muted fw-bold mb-0">Khả Năng Thanh Toán:</label>
-            <select class="form-select form-select-sm" onchange="updateFieldAndNotify(${rowIndex}, 'Trang_thai_hd', this.value)">
-              <option value="Chưa biết" ${customer.Trang_thai_hd === 'Chưa biết' ? 'selected' : ''}>⚪ Chưa biết</option>
-              <option value="Ăn Giựt" ${customer.Trang_thai_hd === 'Ăn Giựt' ? 'selected' : ''}>⛔ Ăn Giựt</option>
-              <option value="Mất khả năng TT" ${customer.Trang_thai_hd === 'Mất khả năng TT' ? 'selected' : ''}>🔴 Mất khả năng TT</option>
-              <option value="Đang kẹt tiền" ${customer.Trang_thai_hd === 'Đang kẹt tiền' ? 'selected' : ''}>🟠 Đang kẹt tiền</option>
-              <option value="Có khả năng" ${customer.Trang_thai_hd === 'Có khả năng' ? 'selected' : ''}>🟢 Có khả năng</option>
-              <option value="Hẹn Thanh Toán" ${customer.Trang_thai_hd === 'Hẹn Thanh Toán' ? 'selected' : ''}>🔵 Hẹn Thanh Toán</option>
-              <option value="Nhiều khả năng(Hẹn)" ${customer.Trang_thai_hd === 'Nhiều khả năng(Hẹn)' ? 'selected' : ''}>🟣 Nhiều khả năng(Hẹn)</option>
-            </select>
-          </div>
-          <div class="col-6">
-            <label class="small text-muted fw-bold mb-0">Độ khó:</label>
-            <select class="form-select form-select-sm" onchange="updateFieldAndNotify(${rowIndex}, 'Muc_do_kho', this.value)">
-              <option value="Chưa biết" ${customer.Muc_do_kho === 'Chưa biết' ? 'selected' : ''}>⚪ Chưa biết</option>
-              <option value="Dễ làm việc" ${customer.Muc_do_kho === 'Dễ làm việc' ? 'selected' : ''}>🟢 Dễ làm việc</option>
-              <option value="Trung lập" ${customer.Muc_do_kho === 'Trung lập' ? 'selected' : ''}>🟡 Trung lập</option>
-              <option value="Khó Tính" ${customer.Muc_do_kho === 'Khó Tính' ? 'selected' : ''}>🟠 Khó Tính</option>
-              <option value="Không hợp tác" ${customer.Muc_do_kho === 'Không hợp tác' ? 'selected' : ''}>🔴 Không hợp tác</option>
-              <option value="Bạo lực" ${customer.Muc_do_kho === 'Bạo lực' ? 'selected' : ''}>⛔ Bạo lực</option>
-            </select>
-          </div>
+        <div class="d-flex gap-2 flex-wrap">
+          <button class="btn btn-sm btn-outline-primary" type="button" onclick="toggleCardSection('${checkCollapseId}', ['${checkCollapseId}', '${infoCollapseId}', '${categoryCollapseId}', '${paymentCollapseId}'])">Check</button>
+          <button class="btn btn-sm btn-outline-success" type="button" onclick="toggleCardSection('${paymentCollapseId}', ['${checkCollapseId}', '${infoCollapseId}', '${categoryCollapseId}', '${paymentCollapseId}'])">Thanh toán</button>
+          <button class="btn btn-sm btn-outline-warning" type="button" onclick="toggleCardSection('${categoryCollapseId}', ['${checkCollapseId}', '${infoCollapseId}', '${categoryCollapseId}', '${paymentCollapseId}'])">Phân loại</button>
+          <button class="btn btn-sm btn-outline-secondary" type="button" onclick="toggleCardSection('${infoCollapseId}', ['${checkCollapseId}', '${infoCollapseId}', '${categoryCollapseId}', '${paymentCollapseId}'])">Thông tin</button>
         </div>
+      </div>
 
-        <div class="d-flex justify-content-between align-items-center mt-2 mb-2">
-          <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#${collapseId}">Mở rộng</button>
-          <span class="badge bg-light text-dark">${nearestKm !== null ? `${nearestKm.toFixed(1)} km` : 'Không có GPS'}</span>
-        </div>
+      <div class="collapse mt-3 pt-2 border-top" id="${infoCollapseId}">
+          <div class="d-flex justify-content-between align-items-start mb-2 gap-2">
+            <div>
+              <small class="text-muted">HĐ: <code>${escapeHtml(soHd)}</code></small>
+              <button class="btn btn-sm btn-link p-0 ms-1" onclick="navigator.clipboard.writeText('${String(soHd).replace(/'/g, "\\'")}').then(() => showToast('Đã copy: ${String(soHd).replace(/'/g, "\\'")}', 'success'))">📋</button>
+            </div>
+          </div>
 
-        <div class="collapse" id="${collapseId}">
+          <div class="row g-2 mb-2">
+            <div class="col-12 text-secondary small">
+              📞 SĐT: <b>${escapeHtml(phone)}</b> | Kỳ: <b>${escapeHtml(currentMonth)}</b><br>
+              ⏰ Quá hạn: <b class="text-danger">${escapeHtml(ngayQuaHan)} ngày</b> | 📊 Lượt check: <b class="text-success">${checkCount} lần</b> | ${apNearText}
+            </div>
+          </div>
+
+          <div class="d-flex justify-content-between align-items-center mt-2 mb-2">
+            <span class="badge bg-light text-dark">${nearestKm !== null ? `${nearestKm.toFixed(1)} km` : 'Không có GPS'}</span>
+          </div>
+
           <div class="sub-section mb-2 text-secondary small">
             <b>📍 Địa chỉ gốc:</b> ${escapeHtml(customer.WARD_HO_KHAU || '---')}<br>
             <div class="mt-1">
@@ -553,45 +637,113 @@ function renderCards(data) {
               </div>
             </div>
 
-            <div>
-              <span class="fw-bold text-success">💰 Đã TT:</span> <span id="text_paid_${rowIndex}" class="fw-bold text-dark">${escapeHtml(paidStr)}</span>
-              <button class="btn btn-sm p-0 ms-1 text-primary" onclick="toggleEdit(${rowIndex}, 'paid')">✏️</button>
-              <div id="box_paid_${rowIndex}" class="d-none mt-1">
-                <div class="input-group input-group-sm">
-                  <input type="number" id="input_paid_${rowIndex}" class="form-control" value="${escapeHtml(customer.So_tien_thanh_toan || '')}">
-                  <button class="btn btn-success" onclick="savePaidAmountInline(${rowIndex})">Lưu</button>
-                  <button class="btn btn-secondary" onclick="toggleEdit(${rowIndex}, 'paid')">Hủy</button>
-                </div>
-              </div>
+          </div>
+
+        </div>
+      </div>
+
+      <div class="collapse mt-2" id="${categoryCollapseId}">
+        <div class="p-2 bg-light rounded border">
+          <div class="row g-2">
+            <div class="col-12">
+              <label class="small text-muted fw-bold mb-1">Tìm nhà:</label>
+              <select class="form-select form-select-sm" onchange="updateFieldAndNotify(${rowIndex}, 'Trang_thai_tim_nha', this.value)">
+                <option value="Chưa tìm" ${customer.Trang_thai_tim_nha === 'Chưa tìm' ? 'selected' : ''}>⚪ Chưa tìm</option>
+                <option value="Đã tới Ấp" ${customer.Trang_thai_tim_nha === 'Đã tới Ấp' ? 'selected' : ''}>🟢 Đã tới Ấp</option>
+                <option value="Bỏ địa phương" ${customer.Trang_thai_tim_nha === 'Bỏ địa phương' ? 'selected' : ''}>🟡 Bỏ địa phương</option>
+                <option value="Có người biết" ${customer.Trang_thai_tim_nha === 'Có người biết' ? 'selected' : ''}>🔵 Có người biết</option>
+                <option value="Gặp người thân" ${customer.Trang_thai_tim_nha === 'Gặp người thân' ? 'selected' : ''}>🟣 Gặp người thân</option>
+                <option value="Gặp khách hàng" ${customer.Trang_thai_tim_nha === 'Gặp khách hàng' ? 'selected' : ''}>🟠 Gặp khách hàng</option>
+              </select>
             </div>
-          </div>
-
-          <div class="d-flex justify-content-between align-items-center mt-2 pt-2 border-top" data-bs-toggle="collapse" data-bs-target="#${collapseId}">
-            <div><span class="badge bg-primary">GPS Quản lý</span></div>
-            <button class="btn btn-sm btn-outline-primary" type="button">🔽 Thao tác Check & GPS</button>
-          </div>
-
-          <div class="mt-2">
-            <div class="p-2 bg-light rounded border">
-              <div class="mb-3">
-                <div class="small fw-bold mb-1">⚡ Xác thực thực địa:</div>
-                <div class="d-flex gap-2">
-                  <button class="btn btn-sm text-white flex-fill" style="background-color: #6f42c1;" onclick="doQuickCheckAo(${rowIndex}, '${String(soHd).replace(/'/g, "\\'")}')">🛡️ Check Áo</button>
-                  <button class="btn btn-sm btn-success flex-fill" onclick="doQuickCheckGps(${rowIndex}, '${String(soHd).replace(/'/g, "\\'")}')">📍 Check GPS</button>
-                </div>
-              </div>
-              <div class="sub-section">
-                <div class="small fw-bold text-primary mb-1">🌐 Tọa độ GPS & ưu tiên:</div>
-                ${renderGpsInputsMobile(customer)}
-              </div>
+            <div class="col-12">
+              <label class="small text-muted fw-bold mb-1">Khả năng thanh toán:</label>
+              <select class="form-select form-select-sm" onchange="updateFieldAndNotify(${rowIndex}, 'Trang_thai_hd', this.value)">
+                <option value="Chưa biết" ${customer.Trang_thai_hd === 'Chưa biết' ? 'selected' : ''}>⚪ Chưa biết</option>
+                <option value="Ăn Giựt" ${customer.Trang_thai_hd === 'Ăn Giựt' ? 'selected' : ''}>⛔ Ăn Giựt</option>
+                <option value="Mất khả năng TT" ${customer.Trang_thai_hd === 'Mất khả năng TT' ? 'selected' : ''}>🔴 Mất khả năng TT</option>
+                <option value="Đang kẹt tiền" ${customer.Trang_thai_hd === 'Đang kẹt tiền' ? 'selected' : ''}>🟠 Đang kẹt tiền</option>
+                <option value="Có khả năng" ${customer.Trang_thai_hd === 'Có khả năng' ? 'selected' : ''}>🟢 Có khả năng</option>
+                <option value="Hẹn Thanh Toán" ${customer.Trang_thai_hd === 'Hẹn Thanh Toán' ? 'selected' : ''}>🔵 Hẹn Thanh Toán</option>
+                <option value="Nhiều khả năng(Hẹn)" ${customer.Trang_thai_hd === 'Nhiều khả năng(Hẹn)' ? 'selected' : ''}>🟣 Nhiều khả năng(Hẹn)</option>
+              </select>
+            </div>
+            <div class="col-12">
+              <label class="small text-muted fw-bold mb-1">Độ khó:</label>
+              <select class="form-select form-select-sm" onchange="updateFieldAndNotify(${rowIndex}, 'Muc_do_kho', this.value)">
+                <option value="Chưa biết" ${customer.Muc_do_kho === 'Chưa biết' ? 'selected' : ''}>⚪ Chưa biết</option>
+                <option value="Dễ làm việc" ${customer.Muc_do_kho === 'Dễ làm việc' ? 'selected' : ''}>🟢 Dễ làm việc</option>
+                <option value="Trung lập" ${customer.Muc_do_kho === 'Trung lập' ? 'selected' : ''}>🟡 Trung lập</option>
+                <option value="Khó Tính" ${customer.Muc_do_kho === 'Khó Tính' ? 'selected' : ''}>🟠 Khó Tính</option>
+                <option value="Không hợp tác" ${customer.Muc_do_kho === 'Không hợp tác' ? 'selected' : ''}>🔴 Không hợp tác</option>
+                <option value="Bạo lực" ${customer.Muc_do_kho === 'Bạo lực' ? 'selected' : ''}>⛔ Bạo lực</option>
+              </select>
             </div>
           </div>
         </div>
       </div>
-    `;
-  }).join('');
 
-  container.innerHTML = cards;
+      <div class="collapse mt-2" id="${paymentCollapseId}">
+        <div class="p-2 bg-light rounded border">
+          <div class="small fw-bold text-success mb-2">💰 Thanh toán:</div>
+          <div class="mb-2">
+            <label class="small text-muted fw-bold mb-1">Số tiền đã thanh toán:</label>
+            <input type="number" class="form-control form-control-sm" id="input_paid_${rowIndex}" value="${escapeHtml(customer.So_tien_thanh_toan || '')}">
+          </div>
+          <button class="btn btn-sm btn-success w-100" onclick="savePaidAmountInline(${rowIndex})">Lưu thanh toán</button>
+        </div>
+      </div>
+
+      <div class="collapse mt-2" id="${checkCollapseId}">
+        <div class="p-2 bg-light rounded border">
+          <div class="mb-3">
+            <div class="small fw-bold mb-1 text-primary">⚡ Xác thực thực địa:</div>
+            <div class="d-flex gap-2">
+              <button class="btn btn-sm text-white flex-fill" style="background-color: #6f42c1;" onclick="toggleCheckGpsDetails(${rowIndex}, true); doQuickCheckAo(${rowIndex}, '${String(soHd).replace(/'/g, "\\'")}')">🛡️ Check Áo</button>
+              <button class="btn btn-sm btn-success flex-fill" onclick="toggleCheckGpsDetails(${rowIndex}, true); doQuickCheckGps(${rowIndex}, '${String(soHd).replace(/'/g, "\\'")}')">📍 Check GPS</button>
+            </div>
+          </div>
+
+          <div id="gpsToggle_${rowIndex}" class="mb-2">
+            <button class="btn btn-sm btn-outline-primary w-100" type="button" onclick="toggleCheckGpsDetails(${rowIndex})">Mở GPS & ưu tiên</button>
+          </div>
+
+          <div class="sub-section d-none" id="gpsDetails_${rowIndex}">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+              <div class="small fw-bold text-primary">🌐 Tọa độ GPS & ưu tiên:</div>
+              <button class="btn btn-xs btn-outline-secondary px-2 py-0" type="button" onclick="toggleCheckGpsDetails(${rowIndex})">Ẩn</button>
+            </div>
+            ${renderGpsInputsMobile(customer)}
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderCards(data) {
+  const container = document.getElementById('customerCardContainer');
+  if (!container) return;
+
+  if (!data || !data.length) {
+    container.innerHTML = '<div class="text-center py-5 text-muted bg-white rounded shadow-sm">Không có dữ liệu phù hợp với bộ lọc.</div>';
+    return;
+  }
+
+  container.innerHTML = data.map((customer, index) => buildCustomerCardHtml(customer, index)).join('');
+}
+
+function toggleCheckGpsDetails(rowIndex, forceOpen) {
+  const box = document.getElementById(`gpsDetails_${rowIndex}`);
+  const toggleButton = document.getElementById(`gpsToggle_${rowIndex}`);
+  if (!box) return;
+
+  const shouldOpen = typeof forceOpen === 'boolean' ? forceOpen : box.classList.contains('d-none');
+  box.classList.toggle('d-none', !shouldOpen);
+
+  if (toggleButton) {
+    toggleButton.classList.toggle('d-none', shouldOpen);
+  }
 }
 
 function renderGpsInputsMobile(item) {
@@ -636,13 +788,15 @@ function renderGpsInputsMobile(item) {
 }
 
 async function quickUpdateCustomer(rowIndex, fieldName, value) {
-  const currentMonth = window.appState.selectedMonth || document.getElementById('filterMonth')?.value || document.getElementById('gpsFilterMonth')?.value || '';
+  const currentMonth = getCurrentMonthTabName();
+  showToast('Đang lưu thông tin...', 'primary');
   try {
     await window.F88_API.post('updateCustomer', {
-      rowIndex,
-      monthTab: currentMonth || 'data',
+      rowIndex: Number(rowIndex),
+      monthTab: currentMonth,
       data: { [fieldName]: value }
     });
+    updateCustomerState(rowIndex, { [fieldName]: value });
     return true;
   } catch (error) {
     console.error(error);
@@ -652,20 +806,26 @@ async function quickUpdateCustomer(rowIndex, fieldName, value) {
 }
 
 async function doQuickCheckAo(rowIndex, soHd) {
-  const currentMonth = window.appState.selectedMonth || document.getElementById('filterMonth')?.value || document.getElementById('gpsFilterMonth')?.value || '';
-  if (!currentMonth) {
+  const currentMonth = getCurrentMonthTabName();
+  if (!currentMonth || currentMonth === 'data') {
     showToast('Vui lòng chọn kỳ tháng trước khi check.', 'danger');
     return;
   }
 
+  showToast('Đang check áo...', 'primary');
+
   try {
     await window.F88_API.post('updateCustomer', {
-      rowIndex,
+      rowIndex: Number(rowIndex),
       monthTab: currentMonth,
       data: {
         Check_Ao: 'Đã Check Áo',
         Check_Time: new Date().toLocaleDateString('vi-VN')
       }
+    });
+    updateCustomerState(rowIndex, {
+      Check_Ao: 'Đã Check Áo',
+      Check_Time: new Date().toLocaleDateString('vi-VN')
     });
     await window.F88_API.post('recordCheckMonth', {
       soHd,
@@ -673,8 +833,8 @@ async function doQuickCheckAo(rowIndex, soHd) {
       monthTab: currentMonth,
       type: 'AO'
     });
-    showToast('Đã check áo thành công');
-    loadCustomerData();
+    showToast('Đã check áo thành công', 'success');
+    refreshSingleCustomerCard(rowIndex);
   } catch (error) {
     console.error(error);
     showToast('Check áo thất bại.', 'danger');
@@ -682,8 +842,8 @@ async function doQuickCheckAo(rowIndex, soHd) {
 }
 
 async function doQuickCheckGps(rowIndex, soHd) {
-  const currentMonth = window.appState.selectedMonth || document.getElementById('filterMonth')?.value || document.getElementById('gpsFilterMonth')?.value || '';
-  if (!currentMonth) {
+  const currentMonth = getCurrentMonthTabName();
+  if (!currentMonth || currentMonth === 'data') {
     showToast('Vui lòng chọn kỳ tháng trước khi check.', 'danger');
     return;
   }
@@ -693,11 +853,14 @@ async function doQuickCheckGps(rowIndex, soHd) {
     return;
   }
 
+  showToast('Đang lấy vị trí GPS...', 'primary');
+
   navigator.geolocation.getCurrentPosition(async (position) => {
     const gps = `${position.coords.latitude.toFixed(6)}, ${position.coords.longitude.toFixed(6)}`;
+    showToast('Đang lưu check GPS...', 'primary');
     try {
       await window.F88_API.post('updateCustomer', {
-        rowIndex,
+        rowIndex: Number(rowIndex),
         monthTab: currentMonth,
         data: {
           Check_GPS: 'Đã Check GPS',
@@ -705,14 +868,19 @@ async function doQuickCheckGps(rowIndex, soHd) {
           GPS_Chinh: gps
         }
       });
+      updateCustomerState(rowIndex, {
+        Check_GPS: 'Đã Check GPS',
+        Check_Time: new Date().toLocaleDateString('vi-VN'),
+        GPS_Chinh: gps
+      });
       await window.F88_API.post('recordCheckMonth', {
         soHd,
         rowIndex,
         monthTab: currentMonth,
         type: 'GPS'
       });
-      showToast('Đã check GPS thành công');
-      loadCustomerData();
+      showToast('Đã check GPS thành công', 'success');
+      refreshSingleCustomerCard(rowIndex);
     } catch (error) {
       console.error(error);
       showToast('Check GPS thất bại.', 'danger');
@@ -749,6 +917,33 @@ async function saveQuickGps(rowIndex, inputId, fieldName) {
   }
 }
 
+function toggleCardSection(activeId, allIds) {
+  const ids = Array.isArray(allIds) ? allIds : [allIds];
+  ids.forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const instance = window.bootstrap && window.bootstrap.Collapse ? window.bootstrap.Collapse.getOrCreateInstance(el) : null;
+    if (instance) {
+      if (id === activeId) {
+        if (el.classList.contains('show')) {
+          instance.hide();
+        } else {
+          instance.show();
+        }
+      } else {
+        instance.hide();
+      }
+      return;
+    }
+
+    if (id === activeId) {
+      el.classList.remove('d-none');
+    } else {
+      el.classList.add('d-none');
+    }
+  });
+}
+
 function toggleEdit(rowIndex, type) {
   const box = document.getElementById(`box_${type}_${rowIndex}`);
   if (box) box.classList.toggle('d-none');
@@ -761,8 +956,8 @@ async function saveInlineEdit(rowIndex, fieldName, inputId, type) {
   toggleEdit(rowIndex, type);
   const saved = await quickUpdateCustomer(rowIndex, fieldName, value);
   if (saved) {
-    showToast('Đã lưu thông tin khách hàng thành công!');
-    loadCustomerData();
+    showToast('Đã lưu thông tin khách hàng thành công!', 'success');
+    refreshSingleCustomerCard(rowIndex);
   }
 }
 
@@ -773,14 +968,17 @@ async function savePaidAmountInline(rowIndex) {
   toggleEdit(rowIndex, 'paid');
   const saved = await quickUpdateCustomer(rowIndex, 'So_tien_thanh_toan', value);
   if (saved) {
-    showToast('Đã lưu số tiền thanh toán!');
-    loadCustomerData();
+    showToast('Đã lưu số tiền thanh toán!', 'success');
+    refreshSingleCustomerCard(rowIndex);
   }
 }
 
 async function updateFieldAndNotify(rowIndex, fieldName, value) {
   const saved = await quickUpdateCustomer(rowIndex, fieldName, value);
-  if (saved) showToast('Đã cập nhật thông tin khách hàng!');
+  if (saved) {
+    showToast('Đã cập nhật thông tin khách hàng!', 'success');
+    refreshSingleCustomerCard(rowIndex);
+  }
 }
 
 async function saveGpsField(rowIndex, key) {
@@ -788,16 +986,16 @@ async function saveGpsField(rowIndex, key) {
   if (!input) return;
   const saved = await quickUpdateCustomer(rowIndex, key, input.value.trim());
   if (saved) {
-    showToast(`Đã lưu ${key}!`);
-    loadCustomerData();
+    showToast(`Đã lưu ${key}!`, 'success');
+    refreshSingleCustomerCard(rowIndex);
   }
 }
 
 async function togglePriorityGps(rowIndex, key, isChecked) {
   const saved = await quickUpdateCustomer(rowIndex, 'Gps_Uu_Tien', isChecked ? key : '');
   if (saved) {
-    showToast(isChecked ? `Đã đặt ${key} làm vị trí ưu tiên!` : 'Đã hủy ưu tiên.');
-    loadCustomerData();
+    showToast(isChecked ? `Đã đặt ${key} làm vị trí ưu tiên!` : 'Đã hủy ưu tiên.', 'success');
+    refreshSingleCustomerCard(rowIndex);
   }
 }
 

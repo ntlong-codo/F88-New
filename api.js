@@ -1,6 +1,6 @@
 (function () {
   window.F88_PASSWORD = '124985';
-  window.F88_API_URL = window.F88_API_URL || 'https://script.google.com/macros/s/AKfycbz93CjJkbSwFe0WJtSEnQP6yDRihzpoyXEvwtshrcJGQWU2Ruw29aTw9LIUNibTIuRb/exec';
+  window.F88_API_URL = window.F88_API_URL || 'https://script.google.com/macros/s/AKfycbzdl5xZ4WFNqhpxvDu2pSgTQ_dcrmhaF1DSd7oi3fR2uWHwvVYzMsFGQyEvIr1l1lUH/exec';
 
   function ensureUrl(value) {
     if (!value || typeof value !== 'string') {

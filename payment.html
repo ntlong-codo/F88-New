@@ -126,47 +126,89 @@
       listNode.innerHTML = '<div class="text-center text-muted py-5">Đang tải khách hàng thanh toán...</div>';
 
       try {
-        const result = await window.F88_API.fetch('getData', { month: month || '' });
-        const rows = Array.isArray(result.data) ? result.data : [];
-
         const monthKey = normalizeMonthKey(month || '');
         const previousMonth = getPreviousMonthKey(monthKey);
 
-        let filtered = rows.filter((row) => {
-          const amount = Number(row.So_tien_thanh_toan || row['So_tien_thanh_toan'] || 0);
-          return amount > 0;
+        const [currentMonthRes, previousMonthRes] = await Promise.all([
+          monthKey ? window.F88_API.fetch('getData', { month: monthKey }) : Promise.resolve({ data: [] }),
+          previousMonth ? window.F88_API.fetch('getData', { month: previousMonth }) : Promise.resolve({ data: [] })
+        ]);
+
+        const currentRows = Array.isArray(currentMonthRes.data) ? currentMonthRes.data : [];
+        const previousRows = Array.isArray(previousMonthRes.data) ? previousMonthRes.data : [];
+
+        const getPaymentAmount = (row) => Number(row.So_tien_thanh_toan || row['So_tien_thanh_toan'] || 0);
+        const getCustomerKey = (row) => {
+          const identifier = row.so_hd || row['so_hd'] || row.Ten_khach_hang || row['Ten_khach_hang'] || row.sdt || row['sdt'] || '';
+          return String(identifier).trim().toLowerCase();
+        };
+
+        const currentPaidMap = new Map();
+        currentRows.forEach((row) => {
+          const amount = getPaymentAmount(row);
+          if (amount >= 500000) {
+            const key = getCustomerKey(row);
+            if (key) currentPaidMap.set(key, row);
+          }
         });
 
+        const previousSchedule = previousRows
+          .filter((row) => getPaymentAmount(row) >= 500000)
+          .map((row) => ({
+            ...row,
+            rowMonth: normalizeMonthKey(row.month || row['month'] || row['Kỳ'] || row['Ky'] || previousMonth || ''),
+            currentPaid: !!(getCustomerKey(row) && currentPaidMap.has(getCustomerKey(row)))
+          }));
+
+        const currentPaidRows = currentRows
+          .filter((row) => getPaymentAmount(row) >= 500000)
+          .map((row) => ({
+            ...row,
+            rowMonth: normalizeMonthKey(row.month || row['month'] || row['Kỳ'] || row['Ky'] || monthKey || ''),
+            currentPaid: true
+          }));
+
+        const seenKeys = new Set();
+        let filtered = [];
         if (mode === 'this_month') {
-          filtered = filtered.filter((row) => normalizeMonthKey(row.month || row['month'] || row['Kỳ'] || row['Ky'] || '') === monthKey);
+          filtered = currentPaidRows;
         } else if (mode === 'previous_month') {
-          filtered = filtered.filter((row) => normalizeMonthKey(row.month || row['month'] || row['Kỳ'] || row['Ky'] || '') === previousMonth);
+          filtered = previousSchedule;
         } else {
-          filtered = filtered.filter((row) => {
-            const rowMonth = normalizeMonthKey(row.month || row['month'] || row['Kỳ'] || row['Ky'] || '');
-            return rowMonth === monthKey || rowMonth === previousMonth;
-          });
+          filtered = [...previousSchedule, ...currentPaidRows.filter((row) => !previousSchedule.some((prev) => getCustomerKey(prev) === getCustomerKey(row)))];
         }
 
-        filtered.sort((a, b) => Number(b.So_tien_thanh_toan || b['So_tien_thanh_toan'] || 0) - Number(a.So_tien_thanh_toan || a['So_tien_thanh_toan'] || 0));
+        filtered = filtered.filter((row) => {
+          const key = getCustomerKey(row);
+          if (!key) return false;
+          if (seenKeys.has(key)) return false;
+          seenKeys.add(key);
+          return true;
+        });
+
+        filtered.sort((a, b) => {
+          const paidSort = Number(Boolean(b.currentPaid)) - Number(Boolean(a.currentPaid));
+          if (paidSort !== 0) return paidSort;
+          return getPaymentAmount(b) - getPaymentAmount(a);
+        });
 
         document.getElementById('paymentTotal').textContent = String(filtered.length);
-        document.getElementById('paymentPaid').textContent = String(filtered.filter((r) => Number(r.So_tien_thanh_toan || r['So_tien_thanh_toan'] || 0) > 0).length);
-        document.getElementById('paymentUnpaid').textContent = String(Math.max(filtered.length - filtered.filter((r) => Number(r.So_tien_thanh_toan || r['So_tien_thanh_toan'] || 0) > 0).length, 0));
-        document.getElementById('paymentCombined').textContent = String(filtered.filter((r) => normalizeMonthKey(r.month || r['month'] || r['Kỳ'] || r['Ky'] || '') === monthKey || normalizeMonthKey(r.month || r['month'] || r['Kỳ'] || r['Ky'] || '') === previousMonth).length);
+        document.getElementById('paymentPaid').textContent = String(filtered.filter((r) => r.currentPaid).length);
+        document.getElementById('paymentUnpaid').textContent = String(Math.max(filtered.length - filtered.filter((r) => r.currentPaid).length, 0));
+        document.getElementById('paymentCombined').textContent = String(filtered.length);
 
         if (!filtered.length) {
-          listNode.innerHTML = '<div class="text-center text-muted py-5">Không có khách hàng thanh toán trong khoảng thời gian này.</div>';
+          listNode.innerHTML = '<div class="text-center text-muted py-5">Không có khách hàng thanh toán trên 500.000 trong khoảng thời gian này.</div>';
           return;
         }
 
-        listNode.innerHTML = filtered.map((row, idx) => {
+        listNode.innerHTML = filtered.map((row) => {
           const name = row.Ten_khach_hang || row['Ten_khach_hang'] || 'Khách hàng';
           const soHd = row.so_hd || row['so_hd'] || '---';
           const phone = row.sdt || row['sdt'] || '---';
-          const amount = Number(row.So_tien_thanh_toan || row['So_tien_thanh_toan'] || 0);
-          const rowMonth = normalizeMonthKey(row.month || row['month'] || row['Kỳ'] || row['Ky'] || '');
-          const status = amount > 0 ? 'Đã TT' : 'Chưa TT';
+          const amount = getPaymentAmount(row);
+          const rowMonth = normalizeMonthKey(row.rowMonth || row.month || row['month'] || row['Kỳ'] || row['Ky'] || monthKey || '');
+          const status = row.currentPaid ? 'Đã TT tháng này' : 'Chưa TT tháng này';
           return `
             <div class="customer-card">
               <div class="d-flex justify-content-between align-items-start gap-2">
@@ -174,7 +216,7 @@
                   <div class="fw-bold text-primary">${escapeHtml(name)}</div>
                   <div class="small text-muted">HĐ: ${escapeHtml(soHd)} | SĐT: ${escapeHtml(phone)}</div>
                 </div>
-                <span class="badge badge-status ${amount > 0 ? 'bg-success' : 'bg-warning text-dark'}">${status}</span>
+                <span class="badge badge-status ${row.currentPaid ? 'bg-success' : 'bg-warning text-dark'}">${status}</span>
               </div>
               <div class="d-flex justify-content-between mt-3 small text-secondary">
                 <span>💰 Số tiền: <b class="text-dark">${amount.toLocaleString()} VNĐ</b></span>
