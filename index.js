@@ -479,30 +479,30 @@ function getStatusBadgeClass(value, type) {
 
   const lookup = {
     timNha: {
-      'Đã tới Ấp': 'bg-warning text-dark',
-      'Bỏ địa phương': 'bg-danger',
-      'Có người biết': 'bg-info',
-      'Gặp người thân': 'bg-primary',
-      'Gặp khách hàng': 'bg-success'
+      'Đã tới Ấp': 'bg-warning-subtle text-warning-emphasis border border-warning-subtle',
+      'Bỏ địa phương': 'bg-danger-subtle text-danger-emphasis border border-danger-subtle',
+      'Có người biết': 'bg-info-subtle text-info-emphasis border border-info-subtle',
+      'Gặp người thân': 'bg-primary-subtle text-primary-emphasis border border-primary-subtle',
+      'Gặp khách hàng': 'bg-success-subtle text-success-emphasis border border-success-subtle'
     },
     hd: {
-      'Ăn Giựt': 'bg-danger',
-      'Mất khả năng TT': 'bg-danger',
-      'Đang kẹt tiền': 'bg-warning text-dark',
-      'Có khả năng': 'bg-success',
-      'Hẹn Thanh Toán': 'bg-info',
-      'Nhiều khả năng(Hẹn)': 'bg-primary'
+      'Ăn Giựt': 'bg-danger-subtle text-danger-emphasis border border-danger-subtle',
+      'Mất khả năng TT': 'bg-danger-subtle text-danger-emphasis border border-danger-subtle',
+      'Đang kẹt tiền': 'bg-warning-subtle text-warning-emphasis border border-warning-subtle',
+      'Có khả năng': 'bg-success-subtle text-success-emphasis border border-success-subtle',
+      'Hẹn Thanh Toán': 'bg-info-subtle text-info-emphasis border border-info-subtle',
+      'Nhiều khả năng(Hẹn)': 'bg-primary-subtle text-primary-emphasis border border-primary-subtle'
     },
     doKho: {
-      'Dễ làm việc': 'bg-success',
-      'Trung lập': 'bg-warning text-dark',
-      'Khó Tính': 'bg-orange text-dark',
-      'Không hợp tác': 'bg-danger',
-      'Bạo lực': 'bg-dark'
+      'Dễ làm việc': 'bg-success-subtle text-success-emphasis border border-success-subtle',
+      'Trung lập': 'bg-warning-subtle text-warning-emphasis border border-warning-subtle',
+      'Khó Tính': 'bg-orange-subtle text-warning-emphasis border border-warning-subtle',
+      'Không hợp tác': 'bg-danger-subtle text-danger-emphasis border border-danger-subtle',
+      'Bạo lực': 'bg-dark-subtle text-dark-emphasis border border-dark-subtle'
     }
   };
 
-  return (lookup[type] || {})[safeValue] || 'bg-secondary';
+  return (lookup[type] || {})[safeValue] || 'bg-secondary-subtle text-secondary-emphasis border border-secondary-subtle';
 }
 
 function getCustomerCategoryBadges(customer) {
@@ -554,16 +554,16 @@ function buildCustomerCardHtml(customer, index) {
         <div class="flex-grow-1 min-w-0">
           <div class="d-flex align-items-center gap-2 flex-wrap">
             <div class="fw-bold text-primary mb-0">${escapeHtml(name)}</div>
-            ${categoryBadges.length ? categoryBadges.map((badge) => `<span class="badge ${badge.className} rounded-pill small">${escapeHtml(badge.label)}</span>`).join('') : ''}
           </div>
+          ${categoryBadges.length ? `<div class="customer-badges">${categoryBadges.map((badge) => `<span class="customer-badge ${badge.className}">${escapeHtml(badge.label)}</span>`).join('')}</div>` : ''}
           ${noteBadgeHtml}
-          <div class="text-secondary small text-truncate">${escapeHtml(summaryAddress)}</div>
+          <div class="customer-address text-truncate">${escapeHtml(summaryAddress)}</div>
         </div>
-        <div class="d-flex gap-2 flex-wrap">
-          <button class="btn btn-sm btn-outline-primary" type="button" onclick="toggleCardSection('${checkCollapseId}', ['${checkCollapseId}', '${infoCollapseId}', '${categoryCollapseId}', '${paymentCollapseId}'])">Check</button>
-          <button class="btn btn-sm btn-outline-success" type="button" onclick="toggleCardSection('${paymentCollapseId}', ['${checkCollapseId}', '${infoCollapseId}', '${categoryCollapseId}', '${paymentCollapseId}'])">Thanh toán</button>
-          <button class="btn btn-sm btn-outline-warning" type="button" onclick="toggleCardSection('${categoryCollapseId}', ['${checkCollapseId}', '${infoCollapseId}', '${categoryCollapseId}', '${paymentCollapseId}'])">Phân loại</button>
-          <button class="btn btn-sm btn-outline-secondary" type="button" onclick="toggleCardSection('${infoCollapseId}', ['${checkCollapseId}', '${infoCollapseId}', '${categoryCollapseId}', '${paymentCollapseId}'])">Thông tin</button>
+        <div class="card-action-group">
+          <button class="btn btn-sm btn-outline-primary card-action-btn" type="button" title="Check" onclick="toggleCardSection('${checkCollapseId}', ['${checkCollapseId}', '${infoCollapseId}', '${categoryCollapseId}', '${paymentCollapseId}'])"><span class="btn-label">✔ Check</span><span class="d-inline d-sm-none">✔</span></button>
+          <button class="btn btn-sm btn-outline-success card-action-btn" type="button" title="Thanh toán" onclick="toggleCardSection('${paymentCollapseId}', ['${checkCollapseId}', '${infoCollapseId}', '${categoryCollapseId}', '${paymentCollapseId}'])"><span class="btn-label">💰 Thanh toán</span><span class="d-inline d-sm-none">💰</span></button>
+          <button class="btn btn-sm btn-outline-warning card-action-btn" type="button" title="Phân loại" onclick="toggleCardSection('${categoryCollapseId}', ['${checkCollapseId}', '${infoCollapseId}', '${categoryCollapseId}', '${paymentCollapseId}'])"><span class="btn-label">🏷 Phân loại</span><span class="d-inline d-sm-none">🏷</span></button>
+          <button class="btn btn-sm btn-outline-secondary card-action-btn" type="button" title="Thông tin" onclick="toggleCardSection('${infoCollapseId}', ['${checkCollapseId}', '${infoCollapseId}', '${categoryCollapseId}', '${paymentCollapseId}'])"><span class="btn-label">ℹ Thông tin</span><span class="d-inline d-sm-none">ℹ</span></button>
         </div>
       </div>
 

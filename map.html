@@ -59,6 +59,19 @@
       border-radius: 12px 12px 12px 12px;
     }
 
+    .map-action-group {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-left: auto;
+    }
+
+    .map-action-group .btn {
+      white-space: nowrap;
+    }
+
     .customer-item-card {
       background: #f8f9fa;
       border: 1px solid #d6dce5;
@@ -322,13 +335,26 @@
         height: 50vh;
       }
     }
+
+    @media (max-width: 576px) {
+      .map-action-group {
+        gap: 4px;
+      }
+      .map-action-group .map-action-label {
+        display: none;
+      }
+      .map-action-group .btn {
+        min-width: 40px;
+        padding-left: 0.5rem;
+        padding-right: 0.5rem;
+      }
+    }
   </style>
 </head>
 <body>
   <div class="container-fluid p-1">
     <div class="d-flex justify-content-between align-items-center mb-2 bg-white p-2 rounded shadow-sm flex-wrap gap-2">
       <div class="d-flex align-items-center">
-        <a href="index.html" class="btn btn-outline-dark btn-sm me-2">⬅️ Danh sách</a>
         <h5 class="mb-0 fw-bold text-danger">🗺️ Bản Đồ F88</h5>
         <span class="badge bg-primary ms-2 fs-6" id="currentMapPeriodBadge">Kỳ: ---</span>
       </div>
@@ -336,21 +362,32 @@
         📊 Tổng khách: <span id="statCustomers" class="text-primary">0</span> |
         📌 Tổng điểm GPS: <span id="statGpsPoints" class="text-success">0</span>
       </div>
-      <div class="d-flex gap-1 flex-wrap align-items-center">
+      <div class="map-action-group">
+        <button class="btn btn-outline-primary btn-sm fw-bold" type="button" onclick="locateMyPosition()" title="Định vị lại">
+          <span class="map-action-label">📍 Định vị lại</span>
+          <span class="d-inline d-sm-none">📍</span>
+        </button>
+        <button class="btn btn-success btn-sm fw-bold" type="button" onclick="loadMapDataAndRender()" title="Tải dữ liệu">
+          <span class="map-action-label">🔄 Tải dữ liệu</span>
+          <span class="d-inline d-sm-none">🔄</span>
+        </button>
+        <button class="btn btn-outline-secondary btn-sm fw-bold" type="button" data-bs-toggle="offcanvas" data-bs-target="#mapFilterDrawer" title="Bộ lọc">
+          <span class="map-action-label">⚙️ Bộ lọc</span>
+          <span class="d-inline d-sm-none">⚙️</span>
+        </button>
         <div class="dropdown">
           <button class="btn btn-primary btn-sm fw-bold dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
-            ☰ Menu
+            ☰
           </button>
           <ul class="dropdown-menu dropdown-menu-end shadow-sm border-0">
             <li><a class="dropdown-item" href="index.html">📋 Danh sách</a></li>
             <li><a class="dropdown-item" href="ap.html">🏡 Đồng Bộ</a></li>
-            <li><a class="dropdown-item" href="payment.html">� Khách nguồn</a></li>
+            <li><a class="dropdown-item" href="payment.html">💰 Khách nguồn</a></li>
           </ul>
         </div>
-        <button id="toggleMapListBtn" class="btn btn-outline-primary btn-sm fw-bold d-lg-none" onclick="toggleMapSidebar()">☰ Ẩn danh sách</button>
-        <button class="btn btn-danger btn-sm fw-bold" onclick="locateMyPosition()">📍 Định Vị Lại</button>
-        <button id="loadMapBtn" class="btn btn-success btn-sm fw-bold" onclick="loadMapDataAndRender()">🔄 Tải Dữ Liệu</button>
-        <button class="btn btn-primary btn-sm fw-bold" type="button" data-bs-toggle="offcanvas" data-bs-target="#mapFilterDrawer">⚙️ Lọc</button>
+        <button id="toggleMapListBtn" class="btn btn-outline-primary btn-sm fw-bold d-lg-none" onclick="toggleMapSidebar()" title="Ẩn danh sách">
+          ☰
+        </button>
       </div>
     </div>
 

@@ -21,6 +21,66 @@
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
     }
 
+    .compact-header-menu {
+      min-width: 210px;
+    }
+
+    .compact-header-menu .dropdown-menu {
+      min-width: 210px;
+      border: 0;
+      box-shadow: 0 12px 26px rgba(0,0,0,0.12);
+      border-radius: 12px;
+      padding: 8px;
+    }
+
+    .top-header-row {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .header-actions-right {
+      margin-left: auto;
+      flex-shrink: 0;
+    }
+
+    .compact-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+    }
+
+    .compact-left-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+
+    .compact-search-box {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+
+    @media (max-width: 767.98px) {
+      .compact-toolbar {
+        flex-wrap: nowrap;
+      }
+      .compact-left-actions {
+        flex-shrink: 0;
+      }
+      .compact-search-box {
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+      .compact-left-actions .btn {
+        padding-left: 0.5rem;
+        padding-right: 0.5rem;
+      }
+    }
+
     .row-check-ao {
       border-left-color: #6f42c1 !important;
       background: #f8f3ff !important;
@@ -35,6 +95,70 @@
       border-left: 3px solid #0d6efd;
       padding-left: 10px;
       margin-top: 8px;
+    }
+
+    .customer-badges {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 4px;
+    }
+
+    .customer-badge {
+      font-size: 11px;
+      line-height: 1.3;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      border-radius: 999px;
+      padding: 5px 9px;
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid transparent;
+    }
+
+    .customer-address {
+      color: #24476c;
+      font-size: 12px;
+      font-weight: 600;
+      line-height: 1.5;
+      letter-spacing: 0.01em;
+      opacity: 0.96;
+    }
+
+    .card-action-group {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      align-items: center;
+      flex-shrink: 0;
+    }
+
+    .card-action-btn {
+      min-width: 0;
+      padding: 0.4rem 0.6rem;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .card-action-btn .btn-label {
+      display: inline;
+    }
+
+    @media (max-width: 576px) {
+      .card-action-group {
+        gap: 4px;
+      }
+      .card-action-btn {
+        min-width: 34px;
+        width: 34px;
+        padding: 0.38rem 0;
+        text-align: center;
+      }
+      .card-action-btn .btn-label {
+        display: none;
+      }
     }
 
     #toast-container {
@@ -64,14 +188,23 @@
   </div>
 
   <div class="container py-3 px-2 d-none" id="mainContent">
-    <div class="d-flex justify-content-between align-items-center mb-2 bg-white p-2 rounded shadow-sm flex-wrap gap-2">
+    <div class="top-header-row mb-2 bg-white p-2 rounded shadow-sm gap-2">
       <h5 class="mb-0 fw-bold text-primary">📋 F88</h5>
-      <div class="d-flex gap-1 flex-wrap">
-        <a href="index.html" class="btn btn-primary btn-sm fw-bold">📋 Danh sách</a>
+      <div class="d-flex align-items-center gap-2 header-actions-right">
         <a href="map.html" class="btn btn-danger btn-sm fw-bold">🗺️ Bản đồ</a>
-        <a href="ap.html" class="btn btn-warning btn-sm fw-bold">🏡 Đồng Bộ</a>
-        <a href="payment.html" class="btn btn-success btn-sm fw-bold">� Khách nguồn</a>
-        <button class="btn btn-outline-secondary btn-sm" onclick="logout()">🔒</button>
+        <div class="dropdown compact-header-menu">
+          <button class="btn btn-primary btn-sm fw-bold dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+            ☰ Menu
+          </button>
+          <ul class="dropdown-menu dropdown-menu-end shadow-sm border-0">
+            <li><a class="dropdown-item" href="index.html">📋 Danh sách</a></li>
+            <li><a class="dropdown-item" href="map.html">🗺️ Bản đồ</a></li>
+            <li><a class="dropdown-item" href="ap.html">🏡 Đồng Bộ</a></li>
+            <li><a class="dropdown-item" href="payment.html">💰 Khách nguồn</a></li>
+            <li><hr class="dropdown-divider" /></li>
+            <li><button class="dropdown-item text-danger" type="button" onclick="logout()">🔒 Đăng xuất</button></li>
+          </ul>
+        </div>
       </div>
     </div>
 
@@ -85,13 +218,20 @@
       </div>
     </div>
 
-    <div class="d-flex gap-2 mb-3 flex-wrap">
-      <button id="gpsFilterToggleBtn" class="btn btn-outline-danger fw-bold text-nowrap" onclick="toggleGpsFilterMode()">📍 Lọc GPS: TẮT</button>
-      <div class="input-group shadow-sm flex-grow-1">
-        <input type="text" id="searchKeyword" class="form-control" placeholder="🔍 Tìm tên, số HĐ..." oninput="filterData()" />
-        <button class="btn btn-outline-primary" type="button" data-bs-toggle="offcanvas" data-bs-target="#filterDrawer">
-          ⚙️ Lọc (<span id="activeFilterCount">0</span>)
+    <div class="compact-toolbar mb-3">
+      <div class="compact-left-actions">
+        <button id="gpsFilterToggleBtn" class="btn btn-outline-danger btn-sm fw-bold text-nowrap" onclick="toggleGpsFilterMode()" aria-label="Lọc GPS">
+          <span class="d-none d-sm-inline">📍 Lọc GPS: TẮT</span>
+          <span class="d-inline d-sm-none">📍</span>
         </button>
+        <button class="btn btn-outline-primary btn-sm" type="button" data-bs-toggle="offcanvas" data-bs-target="#filterDrawer" aria-label="Bộ lọc">
+          <span class="d-none d-sm-inline">⚙️ Lọc</span>
+          <span class="d-inline d-sm-none">⚙️</span>
+          <span class="d-none d-sm-inline"> (<span id="activeFilterCount">0</span>)</span>
+        </button>
+      </div>
+      <div class="input-group shadow-sm compact-search-box">
+        <input type="text" id="searchKeyword" class="form-control form-control-sm" placeholder="🔍 Tìm tên, số HĐ..." oninput="filterData()" />
       </div>
     </div>
 
