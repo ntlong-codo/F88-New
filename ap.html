@@ -60,8 +60,9 @@
 
       <div class="row g-2 mb-3">
         <div class="col-12 col-md-4">
-          <label class="form-label fw-bold small mb-1">Tab ấp:</label>
+          <label class="form-label fw-bold small mb-1">Loại ấp:</label>
           <select id="selectTab" class="form-select">
+            <option value="all">⚡ Tất cả</option>
             <option value="ap_new">Ấp mới</option>
             <option value="ap_old">Ấp cũ</option>
           </select>
@@ -79,16 +80,26 @@
         </div>
       </div>
 
-      <div class="mb-3">
-        <label class="form-label fw-bold small mb-1">Kỳ đồng bộ:</label>
-        <select id="syncMonthSelect" class="form-select">
-          <option value="">⚡ Tất cả các tháng</option>
-        </select>
+      <div class="d-flex justify-content-between align-items-center mb-3 gap-2 flex-wrap">
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+          <div class="small text-muted fw-bold">🧭 Bản đồ vị trí ấp</div>
+          <span id="apMapStatusBadge" class="badge bg-secondary">Đang tải...</span>
+          <span id="apMapPointCount" class="badge bg-info text-dark">0 điểm</span>
+        </div>
       </div>
 
-      <div id="apCardContainer" class="d-grid gap-2">
-        <div class="text-center text-muted py-5 bg-light rounded border">Đang tải dữ liệu ấp...</div>
+      <div id="apMapPanel" class="mt-2">
+        <div class="border rounded overflow-hidden shadow-sm" style="height: 420px; min-height: 300px;">
+          <div id="apMapCanvas" style="width:100%; height:100%; background:#edf2f7;" aria-label="Bản đồ ấp"></div>
+        </div>
       </div>
+
+      <div class="mt-4">
+        <div id="apCardContainer" class="d-grid gap-2" style="max-height: 560px; overflow-y: auto;">
+          <div class="text-center text-muted py-5 bg-light rounded border">Đang tải dữ liệu ấp...</div>
+        </div>
+      </div>
+
     </div>
   </div>
 
@@ -180,6 +191,25 @@
     let currentEditingTab = null;
     let mapPickerObj = null;
     let pickerMarker = null;
+    let hasCenteredMapOnCurrentLocation = false;
+
+    window.apMapState = {
+      map: null,
+      markersLayer: null,
+      markerRegistry: {},
+      focusedApKey: null,
+      skipRender: false
+    };
+
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;'
+      }[char]));
+    }
 
     async function loadMonths() {
       const select = document.getElementById('monthSelect');
@@ -317,91 +347,474 @@
       }
     }
 
-    function renderApList() {
-      const tabName = document.getElementById('selectTab').value;
+    function getApAddressText(item, tabName) {
+      if (tabName === 'ap_new') {
+        return [item.ap || '---', item.xaphuong || '---', item.tinhtp || '---'].join(' • ');
+      }
+      return [item.ap || '---', item.xaphuong || '---', item.quanhuyen || '---', item.tinhtp || '---'].join(' • ');
+    }
+
+    function hasApGpsValue(rawValue) {
+      const normalized = normalizeApGpsString(rawValue || '');
+      if (!normalized) return false;
+      return !!parseApGpsCoordinates(normalized);
+    }
+
+    function getVisibleApEntries() {
+      const selectTab = document.getElementById('selectTab');
       const keyword = (document.getElementById('searchApKeyword').value || '').toLowerCase();
       const onlyNoGps = document.getElementById('filterNoGps').checked;
-      const container = document.getElementById('apCardContainer');
+      const tabValue = selectTab ? selectTab.value : 'all';
+      const sources = tabValue === 'all' ? ['ap_new', 'ap_old'] : [tabValue];
 
-      const rawList = allApData[tabName] || [];
-      const totalCount = rawList.length;
-      let noGpsCount = 0;
+      const entries = [];
+      sources.forEach((tabName) => {
+        (allApData[tabName] || []).forEach((item) => {
+          const hasGps = hasApGpsValue(item.gps);
+          const searchText = `${item.ap || ''} ${item.xaphuong || ''} ${item.quanhuyen || ''} ${item.tinhtp || ''}`.toLowerCase();
+          const matchesKeyword = !keyword || searchText.includes(keyword);
+          const matchesGps = !onlyNoGps || !hasGps;
+          if (matchesKeyword && matchesGps) {
+            entries.push({ ...item, tabName });
+          }
+        });
+      });
+      return entries;
+    }
 
-      const filtered = rawList.filter((item) => {
-        const hasGps = !!(item.gps && String(item.gps).includes(','));
-        if (!hasGps) noGpsCount++;
-        if (onlyNoGps && hasGps) return false;
-        const fullStr = `${item.ap || ''} ${item.xaphuong || ''} ${item.quanhuyen || ''} ${item.tinhtp || ''}`.toLowerCase();
-        if (keyword && !fullStr.includes(keyword)) return false;
-        return true;
+    function centerMapOnCurrentLocation() {
+      if (!window.apMap || hasCenteredMapOnCurrentLocation) return;
+      if (!navigator.geolocation) {
+        hasCenteredMapOnCurrentLocation = true;
+        return;
+      }
+
+      navigator.geolocation.getCurrentPosition((position) => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        window.apMap.setView([lat, lng], 14);
+        hasCenteredMapOnCurrentLocation = true;
+      }, () => {
+        window.apMap.setView([10.03, 105.77], 12);
+        hasCenteredMapOnCurrentLocation = true;
+      }, { enableHighAccuracy: true, timeout: 10000 });
+    }
+
+    function ensureApMap() {
+      if (!window.apMapState) {
+        window.apMapState = {
+          map: null,
+          markersLayer: null,
+          markerRegistry: {},
+          focusedApKey: null,
+          skipRender: false
+        };
+      }
+
+      const host = document.getElementById('apMapCanvas');
+      const mapPane = document.querySelector('.leaflet-map-pane');
+      const paneHeight = mapPane ? parseFloat(getComputedStyle(mapPane).height || '0') : 0;
+      const hostHeight = host ? host.clientHeight : 0;
+
+      if (window.apMapState.map && hostHeight > 0 && paneHeight > hostHeight * 4) {
+        window.apMapState.map.remove();
+        window.apMapState.map = null;
+        window.apMapState.markersLayer = null;
+        window.apMapState.markerRegistry = {};
+      }
+
+      if (!window.apMapState.map) {
+        window.apMapState.map = L.map('apMapCanvas').setView([10.03, 105.77], 12);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 19,
+          attribution: '&copy; OpenStreetMap'
+        }).addTo(window.apMapState.map);
+      }
+
+      if (!window.apMapState.markersLayer) {
+        window.apMapState.markersLayer = L.layerGroup().addTo(window.apMapState.map);
+      }
+
+      window.apMap = window.apMapState.map;
+      window.apMapLayer = window.apMapState.markersLayer;
+      window.apMarkerRegistry = window.apMapState.markerRegistry;
+
+      setTimeout(() => {
+        if (window.apMap) {
+          window.apMap.invalidateSize();
+          window.apMap.setView([10.03, 105.77], 12);
+        }
+      }, 150);
+      centerMapOnCurrentLocation();
+    }
+
+    function normalizeApGpsString(rawValue) {
+      const value = String(rawValue || '')
+        .trim()
+        .replace(/^gps\s*[:=]\s*/i, '')
+        .replace(/lat\s*[:=]/i, '')
+        .replace(/lng\s*[:=]/i, '')
+        .replace(/[()]/g, '')
+        .replace(/[|]/g, ',')
+        .replace(/;/g, ',')
+        .trim();
+
+      if (!value) return '';
+
+      const normalizedText = value.replace(/\s+/g, '');
+      const match = normalizedText.match(/-?\d+(?:[.,]\d+)?[,]-?\d+(?:[.,]\d+)?/);
+      if (match) {
+        const pair = match[0].split(',');
+        const lat = Number(pair[0].replace(/\./g, '.'));
+        const lng = Number(pair[1].replace(/\./g, '.'));
+        if (!Number.isNaN(lat) && !Number.isNaN(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+          return `${lat}, ${lng}`;
+        }
+      }
+
+      const parts = value.split(/[\s,]+/).filter(Boolean);
+      if (parts.length >= 2) {
+        const lat = Number(parts[0]);
+        const lng = Number(parts[1]);
+        if (!Number.isNaN(lat) && !Number.isNaN(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+          return `${lat}, ${lng}`;
+        }
+      }
+
+      return value;
+    }
+
+    function parseApGpsCoordinates(rawValue) {
+      const value = normalizeApGpsString(rawValue);
+      if (!value) return null;
+
+      const parts = value.split(/[\s,]+/).filter(Boolean);
+      if (parts.length >= 2) {
+        const lat = Number(parts[0]);
+        const lng = Number(parts[1]);
+        if (!isNaN(lat) && !isNaN(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+          return { lat, lng };
+        }
+      }
+
+      return null;
+    }
+
+    function focusApMarker(tabName, rowIndex) {
+      const item = (allApData[tabName] || []).find((entry) => Number(entry.rowIndex) === Number(rowIndex));
+      if (!item) return;
+
+      const gps = normalizeApGpsString(item.gps || '');
+      const coords = parseApGpsCoordinates(gps);
+      if (!coords) {
+        showToast('Ấp này chưa có GPS để hiển thị trên bản đồ.', 'warning');
+        return;
+      }
+
+      setTimeout(() => {
+        ensureApMap();
+        const markerKey = `${tabName}|${Number(rowIndex)}`;
+        let marker = window.apMarkerRegistry && window.apMarkerRegistry[markerKey];
+
+        if (!marker) {
+          const color = item.tabName === 'ap_new' ? '#0d3b8c' : '#d92d2d';
+          marker = L.circleMarker([coords.lat, coords.lng], {
+            radius: 7,
+            color: '#ffffff',
+            weight: 2,
+            fillColor: color,
+            fillOpacity: 1
+          }).addTo(window.apMapLayer);
+
+          marker.markerKey = markerKey;
+          if (window.apMarkerRegistry) {
+            window.apMarkerRegistry[markerKey] = marker;
+          }
+
+          const itemAddress = getApAddressText(item, item.tabName);
+          marker.bindPopup(`
+            <div style="min-width:220px; max-width:260px;">
+              <div class="fw-bold text-primary mb-2">${escapeHtml(item.ap || 'Ấp')}</div>
+              <div class="mb-1"><strong>Địa chỉ:</strong> ${escapeHtml(itemAddress)}</div>
+              <div class="mb-1"><strong>GPS:</strong> ${escapeHtml(gps)}</div>
+            </div>
+          `);
+        }
+
+        window.apMapState.focusedApKey = markerKey;
+        window.apMapState.skipRender = true;
+        window.apMap.flyTo([coords.lat, coords.lng], 16, { animate: true, duration: 1.2 });
+        setTimeout(() => {
+          if (marker && typeof marker.openPopup === 'function') {
+            marker.openPopup();
+          }
+          window.apMapState.skipRender = false;
+        }, 350);
+      }, 180);
+    }
+
+    function updateApMapStatus(entries) {
+      const badge = document.getElementById('apMapStatusBadge');
+      const countBadge = document.getElementById('apMapPointCount');
+      const validCount = entries.filter((item) => hasApGpsValue(item.gps)).length;
+
+      if (badge) {
+        if (validCount > 0) {
+          badge.className = 'badge bg-success';
+          badge.textContent = 'Đã load';
+        } else {
+          badge.className = 'badge bg-warning text-dark';
+          badge.textContent = 'Không có GPS';
+        }
+      }
+
+      if (countBadge) {
+        countBadge.textContent = `${validCount} điểm`;
+      }
+    }
+
+    function renderApMap(entries) {
+      const mapHost = document.getElementById('apMapCanvas');
+      if (!mapHost) return;
+
+      ensureApMap();
+      if (window.apMapState && window.apMapState.skipRender) {
+        return;
+      }
+
+      const layer = window.apMapState.markersLayer;
+      if (layer) {
+        layer.clearLayers();
+      }
+      window.apMapState.markerRegistry = {};
+      window.apMarkerRegistry = window.apMapState.markerRegistry;
+
+      updateApMapStatus(entries);
+      if (!entries.length) {
+        return;
+      }
+
+      const markers = [];
+      entries.forEach((item) => {
+        const gps = normalizeApGpsString(item.gps || '');
+        if (!gps) return;
+        const coords = parseApGpsCoordinates(gps);
+        if (!coords) return;
+
+        const color = item.tabName === 'ap_new' ? '#0d3b8c' : '#d92d2d';
+        const marker = L.circleMarker([coords.lat, coords.lng], {
+          radius: 7,
+          color: '#ffffff',
+          weight: 2,
+          fillColor: color,
+          fillOpacity: 1
+        }).addTo(layer);
+
+        const markerKey = `${item.tabName}|${Number(item.rowIndex || 0)}`;
+        marker.markerKey = markerKey;
+        window.apMapState.markerRegistry[markerKey] = marker;
+
+        const itemAddress = getApAddressText(item, item.tabName);
+        marker.bindPopup(`
+          <div style="min-width:220px; max-width:260px;">
+            <div class="fw-bold text-primary mb-2">${escapeHtml(item.ap || 'Ấp')}</div>
+            <div class="mb-1"><strong>Địa chỉ:</strong> ${escapeHtml(itemAddress)}</div>
+            <div class="mb-1"><strong>GPS:</strong> ${escapeHtml(gps)}</div>
+            <div class="mt-2 d-flex flex-wrap gap-2">
+              <button type="button" class="btn btn-sm btn-success" onclick="captureCurrentApLocation('${item.tabName}', ${Number(item.rowIndex || 0)})">📍 Lấy vị trí hiện tại</button>
+              <button type="button" class="btn btn-sm btn-primary" onclick="openApGpsModal('${item.tabName}', ${Number(item.rowIndex || 0)})">🖱️ Chọn bằng tay</button>
+              <button type="button" class="btn btn-sm btn-warning text-white" onclick="openApEditModal('${item.tabName}', ${Number(item.rowIndex || 0)})">✏️ Sửa tên</button>
+              <button type="button" class="btn btn-sm btn-danger" onclick="deleteApLocation('${item.tabName}', ${Number(item.rowIndex || 0)})">🗑️ Xóa</button>
+            </div>
+          </div>
+        `);
+        markers.push(marker);
       });
 
-      document.getElementById('statTotal').innerText = totalCount;
-      document.getElementById('statNoGps').innerText = noGpsCount;
+      if (markers.length) {
+        window.apMap.invalidateSize();
+        window.apMap.setView([10.03, 105.77], 12);
+        setTimeout(() => {
+          if (window.apMap) {
+            window.apMap.invalidateSize();
+            window.apMap.setView([10.03, 105.77], 12);
+          }
+        }, 200);
+      }
+    }
 
-      if (filtered.length === 0) {
+    function renderApList() {
+      const entries = getVisibleApEntries();
+      const container = document.getElementById('apCardContainer');
+      const totalCount = entries.length;
+      const noGpsCount = entries.filter((item) => !hasApGpsValue(item.gps)).length;
+      document.getElementById('statTotal').innerText = String(totalCount);
+      document.getElementById('statNoGps').innerText = String(noGpsCount);
+      renderApMap(entries);
+
+      if (!entries.length) {
         container.innerHTML = '<div class="text-center py-5 text-muted bg-white rounded shadow-sm">Không tìm thấy ấp nào phù hợp.</div>';
         return;
       }
 
-      container.innerHTML = filtered.map((item) => {
-        const hasGps = !!(item.gps && String(item.gps).includes(','));
+      container.innerHTML = entries.map((item) => {
+        const hasGps = hasApGpsValue(item.gps);
         const gpsBadge = hasGps ? '<span class="badge bg-success">Đã có GPS</span>' : '<span class="badge bg-danger">Chưa có GPS</span>';
-
-        let addressDisplay = '';
-        if (tabName === 'ap_new') {
-          addressDisplay = `<b>🏡 Ấp:</b> ${item.ap || '---'} | <b>Xã:</b> ${item.xaphuong || '---'} | <b>Tỉnh:</b> ${item.tinhtp || '---'}`;
-        } else {
-          addressDisplay = `<b>🏡 Ấp:</b> ${item.ap || '---'} | <b>Xã:</b> ${item.xaphuong || '---'} | <b>Huyện:</b> ${item.quanhuyen || '---'} | <b>Tỉnh:</b> ${item.tinhtp || '---'}`;
-        }
-
-        const mapUrl = hasGps ? `https://www.google.com/maps?q=${encodeURIComponent(item.gps)}` : '#';
-        const mapBtnClass = hasGps ? 'btn-danger' : 'btn-outline-secondary disabled';
-
+        const tabLabel = item.tabName === 'ap_new' ? 'Ấp mới' : 'Ấp cũ';
+        const rowLabel = `Dòng #${item.rowIndex || ''}`;
+        const addressText = getApAddressText(item, item.tabName);
         return `
-          <div class="ap-card ${hasGps ? 'has-gps' : 'no-gps'}">
+          <div class="ap-card ${hasGps ? 'has-gps' : 'no-gps'} p-2 border rounded bg-white shadow-sm">
             <div class="d-flex justify-content-between align-items-start mb-1">
-              <div>${gpsBadge} <span class="font-monospace text-muted small ms-2">Dòng #${item.rowIndex || ''}</span></div>
-              <div class="d-flex gap-1">
-                <button class="btn btn-sm btn-primary fw-bold" onclick="openGpsModal('${tabName}', ${item.rowIndex || 0}, '${String(item.ap || '').replace(/'/g, "\\'")}', '${String(item.xaphuong || '').replace(/'/g, "\\'")}', '${String(item.gps || '').replace(/'/g, "\\'")}')">
-                  ${hasGps ? '✏️ Sửa GPS' : '📍 Thêm GPS'}
-                </button>
-                <a href="${mapUrl}" target="_blank" class="btn btn-sm ${mapBtnClass}">🗺️</a>
+              <div>${gpsBadge}<span class="ms-2 small text-primary fw-bold">${tabLabel}</span></div>
+              <div class="d-flex gap-1 flex-wrap">
+                <button class="btn btn-sm btn-primary fw-bold" onclick="openApGpsModal('${item.tabName}', ${item.rowIndex || 0})">${hasGps ? '✏️ GPS' : '📍 GPS'}</button>
+                <button class="btn btn-sm btn-success fw-bold" onclick="focusApMarker('${item.tabName}', ${item.rowIndex || 0})">Đến</button>
+                <button class="btn btn-sm btn-warning text-white fw-bold" onclick="openApEditModal('${item.tabName}', ${item.rowIndex || 0})">✏️ Sửa</button>
+                <button class="btn btn-sm btn-danger fw-bold" onclick="deleteApLocation('${item.tabName}', ${item.rowIndex || 0})">🗑️</button>
               </div>
             </div>
-            <div class="small text-secondary mb-1">${addressDisplay}</div>
+            <div class="small text-secondary mb-1"><strong>${escapeHtml(item.ap || '---')}</strong> <span class="text-muted">${rowLabel}</span></div>
+            <div class="small text-secondary mb-1">${escapeHtml(addressText)}</div>
             <div class="small font-monospace text-dark bg-light p-1 rounded border">
-              <b>Tọa độ:</b> ${item.gps || '<i class="text-muted">Chưa cập nhật</i>'}
+              <b>GPS:</b> ${escapeHtml(normalizeApGpsString(item.gps || '') || '<i>Chưa cập nhật</i>')}
             </div>
           </div>
         `;
       }).join('');
     }
 
-    function openGpsModal(tabName, rowIndex, apName, xaName, currentGps) {
+    function openApEditModal(tabName, rowIndex) {
+      const item = (allApData[tabName] || []).find((entry) => Number(entry.rowIndex) === Number(rowIndex));
+      if (!item) return;
+
+      const fields = tabName === 'ap_new'
+        ? [
+            { key: 'ap', label: 'Tên ấp' },
+            { key: 'xaphuong', label: 'Xã' },
+            { key: 'tinhtp', label: 'Tỉnh' }
+          ]
+        : [
+            { key: 'ap', label: 'Tên ấp' },
+            { key: 'xaphuong', label: 'Xã' },
+            { key: 'quanhuyen', label: 'Huyện' },
+            { key: 'tinhtp', label: 'Tỉnh' }
+          ];
+
+      const modal = document.getElementById('editApModal');
+      if (!modal) {
+        const wrapper = document.createElement('div');
+        wrapper.innerHTML = `
+          <div class="modal fade" id="editApModal" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered">
+              <div class="modal-content">
+                <div class="modal-header bg-warning text-dark">
+                  <h5 class="modal-title fw-bold">✏️ Sửa thông tin ấp</h5>
+                  <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                  <form id="editApForm"></form>
+                </div>
+                <div class="modal-footer">
+                  <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+                  <button type="button" class="btn btn-success" onclick="saveApEditForm()">💾 Lưu</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        `;
+        document.body.appendChild(wrapper.firstElementChild);
+      }
+
+      const form = document.getElementById('editApForm');
+      form.innerHTML = fields.map((field) => `
+        <div class="mb-3">
+          <label class="form-label fw-bold small">${field.label}</label>
+          <input type="text" class="form-control" data-ap-field="${field.key}" value="${escapeHtml(item[field.key] || '')}" />
+        </div>
+      `).join('');
       currentEditingRow = rowIndex;
       currentEditingTab = tabName;
-      document.getElementById('modalTitle').innerText = `📍 Cập Nhật GPS: ${apName} (${xaName})`;
-      document.getElementById('modalAddressInfo').innerText = `Tab: ${tabName} | Dòng: #${rowIndex} | Ấp: ${apName}`;
-      document.getElementById('modalGpsInput').value = currentGps || '';
+      const editModal = new bootstrap.Modal(document.getElementById('editApModal'));
+      editModal.show();
+    }
 
-      const myModal = new bootstrap.Modal(document.getElementById('gpsPickerModal'));
-      myModal.show();
-      setTimeout(() => initMapPicker(currentGps || ''), 300);
+    async function saveApEditForm() {
+      const form = document.getElementById('editApForm');
+      if (!form || !currentEditingTab || !currentEditingRow) return;
+
+      const updates = {};
+      form.querySelectorAll('[data-ap-field]').forEach((input) => {
+        const key = input.getAttribute('data-ap-field');
+        if (key) updates[key] = input.value.trim();
+      });
+
+      if (!Object.keys(updates).length) return;
+      try {
+        const result = await window.F88_API.post('updateApRecord', {
+          tabName: currentEditingTab,
+          rowIndex: Number(currentEditingRow),
+          updates
+        });
+        if (result && result.success) {
+          showToast('Đã lưu thông tin ấp thành công!', 'success');
+          const modal = bootstrap.Modal.getInstance(document.getElementById('editApModal'));
+          if (modal) modal.hide();
+          await loadApData();
+        } else {
+          showToast((result && result.message) || 'Lưu thông tin ấp thất bại.', 'danger');
+        }
+      } catch (error) {
+        showToast('Lỗi khi sửa ấp: ' + error.message, 'danger');
+      }
+    }
+
+    async function deleteApLocation(tabName, rowIndex) {
+      if (!confirm('Bạn muốn xóa ấp này khỏi tab hiện tại?')) return;
+      try {
+        const result = await window.F88_API.post('deleteApRow', { tabName, rowIndex: Number(rowIndex) });
+        if (result && result.success) {
+          showToast('Đã xóa ấp thành công.', 'success');
+          await loadApData();
+        } else {
+          showToast((result && result.message) || 'Xóa ấp thất bại.', 'danger');
+        }
+      } catch (error) {
+        showToast('Lỗi xóa ấp: ' + error.message, 'danger');
+      }
+    }
+
+    function openApGpsModal(tabName, rowIndex) {
+      const item = (allApData[tabName] || []).find((entry) => Number(entry.rowIndex) === Number(rowIndex));
+      if (!item) return;
+      currentEditingRow = rowIndex;
+      currentEditingTab = tabName;
+      const normalizedGps = normalizeApGpsString(item.gps || '');
+      document.getElementById('modalTitle').innerText = `📍 Cập Nhật GPS: ${item.ap || 'Ấp'}`;
+      document.getElementById('modalAddressInfo').innerText = `Tab: ${tabName} | ${getApAddressText(item, tabName)}`;
+      document.getElementById('modalGpsInput').value = normalizedGps;
+      const modal = new bootstrap.Modal(document.getElementById('gpsPickerModal'));
+      modal.show();
+      setTimeout(() => initMapPicker(normalizedGps), 300);
+    }
+
+    function captureCurrentApLocation(tabName, rowIndex) {
+      currentEditingRow = rowIndex;
+      currentEditingTab = tabName;
+      getCurrentLocationMobile();
     }
 
     function initMapPicker(gpsStr) {
       let initialLat = 10.030;
       let initialLng = 105.770;
       let zoomLevel = 13;
+      const normalizedGps = normalizeApGpsString(gpsStr || '');
+      const coords = parseApGpsCoordinates(normalizedGps);
 
-      if (gpsStr && gpsStr.includes(',')) {
-        const p = gpsStr.split(',').map((s) => parseFloat(s.trim()));
-        if (!isNaN(p[0]) && !isNaN(p[1])) {
-          initialLat = p[0];
-          initialLng = p[1];
-          zoomLevel = 16;
-        }
+      if (coords) {
+        initialLat = coords.lat;
+        initialLng = coords.lng;
+        zoomLevel = 16;
       }
 
       if (!mapPickerObj) {
@@ -418,9 +831,8 @@
         mapPickerObj.setView([initialLat, initialLng], zoomLevel);
       }
 
-      if (gpsStr && gpsStr.includes(',')) {
-        const p = gpsStr.split(',').map((s) => parseFloat(s.trim()));
-        setPickerMarker(p[0], p[1]);
+      if (coords) {
+        setPickerMarker(coords.lat, coords.lng);
       } else if (pickerMarker) {
         mapPickerObj.removeLayer(pickerMarker);
         pickerMarker = null;
@@ -457,7 +869,7 @@
     }
 
     async function saveGpsFromModal() {
-      const gpsVal = document.getElementById('modalGpsInput').value.trim();
+      const gpsVal = normalizeApGpsString(document.getElementById('modalGpsInput').value.trim());
       if (!gpsVal) {
         alert('Vui lòng nhập hoặc chọn tọa độ GPS!');
         return;
@@ -614,6 +1026,7 @@
       const filterNoGps = document.getElementById('filterNoGps');
       const newApGpsInput = document.getElementById('newApGps');
       const saveBtn = document.getElementById('saveNewApLocationBtn');
+      const apMapPanel = document.getElementById('apMapPanel');
 
       if (selectTab) selectTab.addEventListener('change', renderApList);
       if (searchInput) searchInput.addEventListener('input', renderApList);
@@ -624,6 +1037,14 @@
         });
       }
       toggleApInsertFields();
+      setTimeout(() => {
+        ensureApMap();
+        renderApList();
+        if (window.apMap) {
+          window.apMap.invalidateSize();
+          window.apMap.setView([10.03, 105.77], 12);
+        }
+      }, 200);
     }
 
     window.addEventListener('DOMContentLoaded', initializePage);

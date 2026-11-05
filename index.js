@@ -283,6 +283,7 @@ function filterData() {
   const keyword = (document.getElementById('searchKeyword') || {}).value || '';
   const thuongTru = (document.getElementById('filterThuongTru') || {}).value || '';
   const gpsFilterType = document.getElementById('gpsFilterType')?.value || 'all';
+  const gpsFilterCheckState = document.getElementById('gpsFilterCheckState')?.value || '';
   const gpsFilterAp = window.appState.apFilterEnabled ? (document.getElementById('gpsFilterAp')?.value || 'all') : 'all';
   const isRegularFilterActive = !window.appState.gpsFilterEnabled;
 
@@ -296,9 +297,14 @@ function filterData() {
       if (selectedCheck) {
         const checkValue = String(customer.Check_GPS || customer['Check_GPS'] || '').trim();
         const checkAoValue = String(customer.Check_Ao || customer['Check_Ao'] || '').trim();
-        if (selectedCheck === 'ChuaCheck' && (checkValue !== '' || checkAoValue !== '')) return false;
-        if (selectedCheck === 'DaCheckGps' && checkValue.toLowerCase().indexOf('gps') === -1) return false;
-        if (selectedCheck === 'DaCheckAo' && checkAoValue.toLowerCase().indexOf('áo') === -1 && checkAoValue.toLowerCase().indexOf('ao') === -1) return false;
+        const isChecked = checkValue !== '' || checkAoValue !== '';
+        const isGpsChecked = checkValue.toLowerCase().indexOf('gps') !== -1;
+        const isAoChecked = checkAoValue.toLowerCase().indexOf('áo') !== -1 || checkAoValue.toLowerCase().indexOf('ao') !== -1;
+
+        if (selectedCheck === 'ChuaCheck' && isChecked) return false;
+        if (selectedCheck === 'DaCheck' && !isChecked) return false;
+        if (selectedCheck === 'DaCheckGps' && !isGpsChecked) return false;
+        if (selectedCheck === 'DaCheckAo' && !isAoChecked) return false;
       }
 
       if (selectedGpsType && selectedGpsType !== 'all') {
@@ -322,11 +328,24 @@ function filterData() {
       }
     }
 
+    if (window.appState.gpsFilterEnabled) {
+      const checkValue = String(customer.Check_GPS || customer['Check_GPS'] || '').trim();
+      const checkAoValue = String(customer.Check_Ao || customer['Check_Ao'] || '').trim();
+      const isChecked = checkValue !== '' || checkAoValue !== '';
+      const isGpsChecked = checkValue.toLowerCase().indexOf('gps') !== -1;
+      const isAoChecked = checkAoValue.toLowerCase().indexOf('áo') !== -1 || checkAoValue.toLowerCase().indexOf('ao') !== -1;
+
+      if (gpsFilterCheckState === 'ChuaCheck' && isChecked) return false;
+      if (gpsFilterCheckState === 'DaCheckGps' && !isGpsChecked) return false;
+      if (gpsFilterCheckState === 'DaCheckAo' && !isAoChecked) return false;
+      if (gpsFilterCheckState === 'DaCheck' && !isChecked) return false;
+    }
+
     if (window.appState.gpsFilterEnabled || (gpsFilterType && gpsFilterType !== 'all')) {
       if (!hasAnyValidCustomerGps(customer)) return false;
     }
 
-    if (gpsFilterType && gpsFilterType !== 'all') {
+    if (gpsFilterType && gpsFilterType !== 'all' && !window.appState.gpsFilterEnabled) {
       const gpsValue = String(customer[gpsFilterType] || customer[gpsFilterType.toLowerCase()] || '').trim();
       if (!gpsValue) return false;
     }
@@ -1026,13 +1045,21 @@ function escapeHtml(value) {
 function toggleGpsFilterMode() {
   const box = document.getElementById('gpsFilterControlBox');
   const button = document.getElementById('gpsFilterToggleBtn');
-  window.appState.gpsFilterEnabled = !window.appState.gpsFilterEnabled;
-  box.classList.toggle('d-none', !window.appState.gpsFilterEnabled);
-  button.textContent = window.appState.gpsFilterEnabled ? '📍 Lọc GPS: BẬT' : '📍 Lọc GPS: TẮT';
-  if (window.appState.gpsFilterEnabled) {
+  const nextState = !window.appState.gpsFilterEnabled;
+
+  window.appState.gpsFilterEnabled = nextState;
+  box.classList.toggle('d-none', !nextState);
+  button.textContent = nextState ? '📍 Lọc GPS: BẬT' : '📍 Lọc GPS: TẮT';
+  button.classList.toggle('btn-danger', nextState);
+  button.classList.toggle('btn-outline-danger', !nextState);
+
+  if (nextState) {
     locateCurrentPosition().then(() => filterData());
+  } else {
+    filterData();
   }
-  showToast(window.appState.gpsFilterEnabled ? 'Bộ lọc GPS đã bật.' : 'Bộ lọc GPS đã tắt.', 'info');
+
+  showToast(nextState ? 'Bộ lọc GPS đã bật, lọc thường bị tắt.' : 'Bộ lọc GPS đã tắt, áp dụng lại lọc thường.', 'info');
 }
 
 function toggleApFilterMode() {
@@ -1067,7 +1094,7 @@ window.filterData = filterData;
 window.updateFilterCount = updateFilterCount;
 window.resetFilters = function () {
   document.getElementById('filterMonth').value = '';
-  document.getElementById('filterCheck').value = '';
+  document.getElementById('filterCheck').value = 'ChuaCheck';
   document.getElementById('filterGpsType').value = 'all';
   document.getElementById('filterThanhToan').value = '';
   document.getElementById('filterTrangThaiHd').value = '';

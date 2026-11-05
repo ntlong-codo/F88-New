@@ -436,11 +436,31 @@ function computeCustomerGpsTone(customer) {
   return { key: 'gps-ap', label: distanceText || 'GPS ấp', color: '#f59e0b', light: '#fff7e6', text: '#b7791f' };
 }
 
-function getCustomerMarkerIcon(customer, index) {
-  const tone = computeCustomerStatusTone(customer);
+function hashString(text) {
+  let hash = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    hash = (hash * 31 + text.charCodeAt(i)) >>> 0;
+  }
+  return hash;
+}
+
+function getCustomerMarkerColor(customer) {
+  const key = [
+    getObjectValueByAnyKey(customer, ['so_hd', 'SO_HD', 'So_HD']) || '',
+    getObjectValueByAnyKey(customer, ['Ten_khach_hang', 'ten_khach_hang']) || '',
+    String(customer.rowIndex || customer['rowIndex'] || 0)
+  ].join('|');
+
+  const hue = hashString(key) % 360;
+  return `hsl(${hue} 72% 52%)`;
+}
+
+function getCustomerMarkerIcon(customer, entry, index) {
+  const baseColor = getCustomerMarkerColor(customer);
+  const letter = (entry.label || '').replace(/[^A-Za-z]/g, '').slice(0, 1) || String(index + 1);
   return L.divIcon({
     className: 'gps-marker-num',
-    html: `<span style="background:${tone.color}; color: white; display:inline-flex; width:28px; height:28px; border-radius:50%; align-items:center; justify-content:center; border:2px solid rgba(255,255,255,0.9); box-shadow:0 4px 12px rgba(0,0,0,0.25); font-weight:800; font-size:11px;">${index + 1}</span>`,
+    html: `<span style="background:${baseColor}; color: white; display:inline-flex; width:28px; height:28px; border-radius:50%; align-items:center; justify-content:center; border:2px solid rgba(255,255,255,0.9); box-shadow:0 4px 12px rgba(0,0,0,0.25); font-weight:800; font-size:11px;">${letter}</span>`,
     iconSize: [28, 28],
     iconAnchor: [14, 14]
   });
@@ -456,26 +476,31 @@ function buildCustomerPopupHtml(customer) {
   const rowIndex = Number(customer.rowIndex || customer['rowIndex'] || 0) || 0;
   const soHd = getObjectValueByAnyKey(customer, ['so_hd', 'SO_HD', 'So_HD']) || '---';
   const name = getObjectValueByAnyKey(customer, ['Ten_khach_hang', 'ten_khach_hang']) || 'Khách hàng';
+  const diaChi = [
+    getObjectValueByAnyKey(customer, ['WARD_HO_KHAU', 'ward_ho_khau', 'WARD_TAM_TRU', 'ward_tam_tru']),
+    getObjectValueByAnyKey(customer, ['WARD_TAM_TRU', 'ward_tam_tru'])
+  ].filter(Boolean).join(' • ') || 'Chưa có địa chỉ';
   const apNew = getObjectValueByAnyKey(customer, ['WARD_HO_KHAU_AP_NEW', 'ward_ho_khau_ap_new']) || 'Chưa có';
   const apOld = getObjectValueByAnyKey(customer, ['WARD_HO_KHAU_AP_OLD', 'ward_ho_khau_ap_old']) || 'Chưa có';
-  const note = getObjectValueByAnyKey(customer, ['Ghi_chu', 'ghi_chu']) || 'Chưa có';
+  const note = getObjectValueByAnyKey(customer, ['Ghi_chu', 'ghi_chu']) || '';
+  const noteHtml = note ? `<div class="mb-2"><strong>Ghi chú:</strong> ${escapeHtml(note)}</div>` : '';
   const gpsInfo = getCustomerGpsEntries(customer);
   const gpsHtml = gpsInfo.length
     ? gpsInfo.map((entry) => `
-        <div style="display:flex; justify-content:space-between; gap:8px; align-items:center; margin-top:4px;">
+        <div style="display:flex; justify-content:space-between; gap:8px; align-items:center; margin-top:4px; cursor:pointer;" onclick="focusCustomerGps(${rowIndex}, '${entry.key}')">
           <small><strong>${escapeHtml(entry.label)}:</strong> ${escapeHtml(entry.raw)}</small>
-          <button type="button" class="btn btn-link btn-sm p-0 text-primary" onclick="focusCustomerGps(${rowIndex}, '${entry.key}')">Mở vị trí</button>
         </div>
       `).join('')
     : '<small class="text-muted">Chưa có GPS</small>';
 
   return `
-    <div style="min-width:220px; max-width:260px;">
+    <div style="min-width:240px; max-width:290px;">
       <div class="fw-bold text-primary mb-2">${escapeHtml(name)}</div>
+      ${noteHtml}
       <div class="mb-1"><strong>HĐ:</strong> ${escapeHtml(soHd)}</div>
+      <div class="mb-1"><strong>Địa chỉ:</strong> ${escapeHtml(diaChi)}</div>
       <div class="mb-1"><strong>Ấp New:</strong> ${escapeHtml(apNew)}</div>
       <div class="mb-1"><strong>Ấp Old:</strong> ${escapeHtml(apOld)}</div>
-      <div class="mb-2"><strong>Ghi chú:</strong> ${escapeHtml(note)}</div>
       <div class="mb-2">${gpsHtml}</div>
       <div class="d-flex flex-wrap gap-2">
         <button type="button" class="btn btn-sm btn-success" onclick="window.doMapCustomerCheckGps(${rowIndex}, '${escapeHtml(soHd)}')">📍 Check GPS</button>
@@ -624,10 +649,12 @@ function renderMapMarkers(data) {
 
     const primaryEntry = getNearestGpsEntry(customer);
     gpsEntries.forEach((entry, entryIndex) => {
+      const baseColor = getCustomerMarkerColor(customer);
+      const letter = (entry.label || '').replace(/[^A-Za-z]/g, '').slice(0, 1) || String(entryIndex + 1);
       const isPrimary = primaryEntry && entry.key === primaryEntry.key && entry.raw === primaryEntry.raw;
       const markerIcon = L.divIcon({
         className: 'gps-marker-num',
-        html: `<span style="background:${isPrimary ? '#0d6efd' : '#6c757d'}; color: white; display:inline-flex; width:22px; height:22px; border-radius:50%; align-items:center; justify-content:center; border:2px solid rgba(255,255,255,0.9); box-shadow:0 4px 12px rgba(0,0,0,0.25); font-weight:700; font-size:10px;">${entry.label.replace(/[^A-Z]/gi, '').slice(0, 1) || (entryIndex + 1)}</span>`,
+        html: `<span style="background:${baseColor}; color: white; display:inline-flex; width:22px; height:22px; border-radius:50%; align-items:center; justify-content:center; border:2px solid rgba(255,255,255,0.9); box-shadow:0 4px 12px rgba(0,0,0,0.25); font-weight:700; font-size:10px;">${letter}</span>`,
         iconSize: [22, 22],
         iconAnchor: [11, 11]
       });
@@ -638,13 +665,21 @@ function renderMapMarkers(data) {
 
       const markerKey = `${getCustomerMarkerKey(customer)}-${entry.key}`;
       window.mapState.markerRegistry[markerKey] = marker;
+      const note = getObjectValueByAnyKey(customer, ['Ghi_chu', 'ghi_chu']) || '';
+      const noteHtml = note ? `<div class="mb-1"><strong>Ghi chú:</strong> ${escapeHtml(note)}</div>` : '';
       marker.bindPopup(`
-        <div style="min-width:220px; max-width:260px;">
+        <div style="min-width:240px; max-width:290px;">
           <div class="fw-bold text-primary mb-2">${escapeHtml(getObjectValueByAnyKey(customer, ['Ten_khach_hang', 'ten_khach_hang']) || 'Khách hàng')}</div>
+          ${noteHtml}
+          <div class="mb-1"><strong>Địa chỉ:</strong> ${escapeHtml([getObjectValueByAnyKey(customer, ['WARD_HO_KHAU', 'ward_ho_khau']), getObjectValueByAnyKey(customer, ['WARD_TAM_TRU', 'ward_tam_tru'])].filter(Boolean).join(' • ') || 'Chưa có địa chỉ')}</div>
+          <div class="mb-1"><strong>Ấp New:</strong> ${escapeHtml(getObjectValueByAnyKey(customer, ['WARD_HO_KHAU_AP_NEW', 'ward_ho_khau_ap_new']) || 'Chưa có')}</div>
+          <div class="mb-1"><strong>Ấp Old:</strong> ${escapeHtml(getObjectValueByAnyKey(customer, ['WARD_HO_KHAU_AP_OLD', 'ward_ho_khau_ap_old']) || 'Chưa có')}</div>
           <div class="mb-1"><strong>${escapeHtml(entry.label)}:</strong> ${escapeHtml(entry.raw)}</div>
           <div class="mb-1"><strong>Khoảng cách:</strong> ${entry.distanceKm !== null ? `${entry.distanceKm.toFixed(1)} km` : 'Không xác định'}</div>
-          <div class="mt-2">
-            <button type="button" class="btn btn-sm btn-primary" onclick="window.focusCustomerGps(${customer.rowIndex || customer['rowIndex'] || index + 2}, '${entry.key}')">Mở vị trí</button>
+          <div class="mt-2 d-flex flex-wrap gap-2">
+            <button type="button" class="btn btn-sm btn-success" onclick="window.doMapCustomerCheckGps(${customer.rowIndex || customer['rowIndex'] || index + 2}, '${escapeHtml(getObjectValueByAnyKey(customer, ['so_hd', 'SO_HD', 'So_HD']) || '---')}')">📍 Check GPS</button>
+            <button type="button" class="btn btn-sm btn-warning text-white" onclick="window.doMapCustomerCheckAo(${customer.rowIndex || customer['rowIndex'] || index + 2}, '${escapeHtml(getObjectValueByAnyKey(customer, ['so_hd', 'SO_HD', 'So_HD']) || '---')}')">🛡️ Check ảo</button>
+            <button type="button" class="btn btn-sm btn-primary" onclick="window.openCustomerDirections(${customer.rowIndex || customer['rowIndex'] || index + 2})">🧭 Chỉ đường</button>
           </div>
         </div>
       `);
@@ -661,7 +696,7 @@ function renderMapMarkers(data) {
       const gpsEntries = getCustomerGpsEntries(customer);
       const gpsText = gpsEntries.length ? gpsEntries.map((entry) => {
         const distLabel = entry.distanceKm !== null ? ` • ${entry.distanceKm.toFixed(1)} km` : '';
-        return `<div class="gps-mini-row"><span class="gps-mini-label">${escapeHtml(entry.label)}:</span> <span class="gps-mini-value">${escapeHtml(entry.raw)}</span><button class="gps-mini-action" type="button" onclick="event.stopPropagation(); focusCustomerGps(${customer.rowIndex || customer['rowIndex'] || index + 2}, '${entry.key}')">Mở vị trí</button>${distLabel}</div>`;
+        return `<div class="gps-mini-row" role="button" tabindex="0" onclick="event.stopPropagation(); focusCustomerGps(${customer.rowIndex || customer['rowIndex'] || index + 2}, '${entry.key}')" onkeydown="if(event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); focusCustomerGps(${customer.rowIndex || customer['rowIndex'] || index + 2}, '${entry.key}'); }"><span class="gps-mini-label">${escapeHtml(entry.label)}:</span> <span class="gps-mini-value">${escapeHtml(entry.raw)}</span>${distLabel}</div>`;
       }).join('') : '<div class="text-muted small">Chưa có GPS</div>';
 
       const name = getObjectValueByAnyKey(customer, ['Ten_khach_hang', 'ten_khach_hang', 'TEN_KHACH_HANG']) || 'Khách hàng';
@@ -694,7 +729,6 @@ function renderMapMarkers(data) {
             </div>
 
             <div class="customer-action-row">
-              <button class="btn btn-sm btn-outline-primary" onclick="event.stopPropagation(); panToMapCustomer(${rowIndex})">👁️ Xem</button>
               <button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); ${focusButtonAction}">${focused ? '📌' : '👁️'} ${focusButtonLabel}</button>
               <button class="btn btn-sm btn-success" onclick="event.stopPropagation(); doMapCustomerCheckGps(${rowIndex}, '${escapeHtml(soHd)}')">📍 Check GPS</button>
               <button class="btn btn-sm btn-warning text-white" onclick="event.stopPropagation(); doMapCustomerCheckAo(${rowIndex}, '${escapeHtml(soHd)}')">🛡️ Check Áo</button>
@@ -712,6 +746,8 @@ function renderMapMarkers(data) {
 }
 
 function toggleAllCustomerFocus() {
+  setCustomerFocus(null);
+
   if (window.mapState.filteredData.length && window.mapState.map) {
     const group = L.featureGroup(window.mapState.filteredData.map((customer) => {
       const coords = parseGpsCoord(getPreferredGpsValue(customer));
