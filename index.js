@@ -5,7 +5,9 @@ window.appState = {
   gpsFilterEnabled: false,
   apFilterEnabled: false,
   apFilterType: 'ap_old',
+  apFilterGroupMode: 'xa',
   expandedApGroupKey: null,
+  expandedApChildKey: null,
   selectedMonth: '',
   pendingFocus: null,
   currentLocation: null,
@@ -28,6 +30,99 @@ function normalizeMonthKey(value) {
   const compact = noSpace.match(/(\d{1,2})(\d{4})/);
   if (compact) return compact[1].padStart(2, '0') + compact[2];
   return noSpace;
+}
+
+function normalizeLocationText(value) {
+  const text = String(value ?? '')
+    .trim()
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+
+  if (!text) return '';
+
+  const prefixes = [
+    'khu vuc', 'khu vực', 'kv',
+    'thi tran', 'thị trấn', 'tt',
+    'thi xa', 'thị xã', 'tx',
+    'huyen', 'huyện',
+    'xa', 'xã',
+    'phuong', 'phường', 'p',
+    'thon', 'thôn',
+    'ap', 'ấp',
+    'tinh', 'tỉnh',
+    'thanh pho', 'thành phố', 'tp',
+    'quan', 'quận',
+    'duong', 'đường'
+  ];
+
+  let normalized = text;
+  for (const prefix of prefixes) {
+    normalized = normalized.replace(new RegExp(`^${prefix.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')}\\s*[-:]*\\s*`, 'i'), '');
+  }
+
+  normalized = normalized
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return normalized;
+}
+
+function normalizeLocationKey(...parts) {
+  const values = parts
+    .map((part) => normalizeLocationText(part))
+    .filter(Boolean);
+
+  if (!values.length) return 'chua-co';
+  return values.join(' || ');
+}
+
+function parseApAddressString(value, type) {
+  const raw = String(value ?? '').trim();
+  if (!raw) {
+    return {
+      ap: 'Chưa có ấp',
+      xa: 'Chưa có xã',
+      huyen: type === 'ap_old' ? 'Chưa có huyện' : '',
+      tinh: 'Chưa có tỉnh'
+    };
+  }
+
+  const parts = raw
+    .split(/[;,]/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  const normalized = parts.map((part) => normalizeLocationText(part)).filter(Boolean);
+
+  if (!normalized.length) {
+    return {
+      ap: 'Chưa có ấp',
+      xa: 'Chưa có xã',
+      huyen: type === 'ap_old' ? 'Chưa có huyện' : '',
+      tinh: 'Chưa có tỉnh'
+    };
+  }
+
+  if (type === 'ap_old') {
+    return {
+      ap: normalized[0] || 'Chưa có ấp',
+      xa: normalized[1] || 'Chưa có xã',
+      huyen: normalized[2] || 'Chưa có huyện',
+      tinh: normalized[normalized.length - 1] || 'Chưa có tỉnh'
+    };
+  }
+
+  return {
+    ap: normalized[0] || 'Chưa có ấp',
+    xa: normalized[1] || 'Chưa có xã',
+    huyen: '',
+    tinh: normalized[normalized.length - 1] || 'Chưa có tỉnh'
+  };
 }
 
 function formatMonthLabel(value) {
@@ -305,45 +400,86 @@ function applyApFilter(data) {
   const groups = {};
 
   data.forEach((customer) => {
-    const apName = String(customer[apKeyField] || customer[apKeyField.toLowerCase()] || '').trim();
-    if (!apName) return;
-    if (!groups[apName]) {
-      groups[apName] = {
-        key: apName,
+    const rawApValue = customer[apKeyField] || customer[apKeyField.toLowerCase()] || '';
+    const parsed = parseApAddressString(rawApValue, apType);
+
+    const tinhName = normalizeLocationKey(parsed.tinh || customer.TINHTP || customer['TINHTP'] || '');
+    const huyenName = normalizeLocationKey(parsed.huyen || customer.WARD_TAM_TRU || customer['WARD_TAM_TRU'] || '');
+    const xaName = normalizeLocationKey(parsed.xa || customer.WARD_HO_KHAU || customer['WARD_HO_KHAU'] || '');
+    const apName = normalizeLocationKey(parsed.ap || rawApValue || '');
+
+    const communeKey = `${tinhName}||${huyenName}||${xaName}`;
+    const apKey = apName;
+
+    if (!groups[communeKey]) {
+      groups[communeKey] = {
+        key: xaName,
+        type: 'xa',
+        xaphuong: xaName,
+        quanhuyen: huyenName,
+        tinhtp: tinhName,
+        apGroups: {}
+      };
+    }
+
+    if (!groups[communeKey].apGroups[apKey]) {
+      groups[communeKey].apGroups[apKey] = {
+        key: apKey,
         type: apType,
-        xaphuong: customer.WARD_HO_KHAU || customer['WARD_HO_KHAU'] || '',
-        quanhuyen: customer.WARD_TAM_TRU || customer['WARD_TAM_TRU'] || '',
-        tinhtp: customer.TINHTP || customer['TINHTP'] || '',
+        xaphuong: xaName,
+        quanhuyen: huyenName,
+        tinhtp: tinhName,
         customers: []
       };
     }
-    groups[apName].customers.push(customer);
+
+    groups[communeKey].apGroups[apKey].customers.push(customer);
   });
 
-  const apEntries = Object.values(groups)
+  return Object.values(groups)
     .map((entry) => {
-      const coords = entry.customers
-        .map((customer) => getCustomerCoord(customer))
-        .filter(Boolean);
-      const center = coords.length ? {
-        lat: coords.reduce((sum, coord) => sum + coord.lat, 0) / coords.length,
-        lng: coords.reduce((sum, coord) => sum + coord.lng, 0) / coords.length
+      const apEntries = Object.values(entry.apGroups)
+        .map((apEntry) => {
+          const coords = apEntry.customers
+            .map((customer) => getCustomerCoord(customer))
+            .filter(Boolean);
+          const nearestKm = window.appState.currentLocation && coords.length
+            ? Math.min(...coords.map((coord) => haversineKm(window.appState.currentLocation.lat, window.appState.currentLocation.lng, coord.lat, coord.lng)))
+            : null;
+
+          return {
+            ...apEntry,
+            count: apEntry.customers.length,
+            coords,
+            nearestKm
+          };
+        })
+        .sort((a, b) => (a.nearestKm ?? Number.MAX_SAFE_INTEGER) - (b.nearestKm ?? Number.MAX_SAFE_INTEGER));
+
+      const allCoords = apEntries.flatMap((apEntry) => apEntry.coords);
+      const center = allCoords.length ? {
+        lat: allCoords.reduce((sum, coord) => sum + coord.lat, 0) / allCoords.length,
+        lng: allCoords.reduce((sum, coord) => sum + coord.lng, 0) / allCoords.length
       } : null;
-      const nearestKm = center && window.appState.currentLocation
+      const nearestKm = window.appState.currentLocation && center
         ? haversineKm(window.appState.currentLocation.lat, window.appState.currentLocation.lng, center.lat, center.lng)
         : null;
 
+      const totalCustomers = apEntries.reduce((sum, apEntry) => sum + apEntry.count, 0);
       return {
         ...entry,
-        count: entry.customers.length,
-        coords,
+        count: totalCustomers,
+        coords: allCoords,
         center,
-        nearestKm
+        nearestKm,
+        apGroups: apEntries
       };
     })
-    .sort((a, b) => (a.nearestKm ?? Number.MAX_SAFE_INTEGER) - (b.nearestKm ?? Number.MAX_SAFE_INTEGER));
-
-  return apEntries;
+    .sort((a, b) => {
+      const left = [a.tinhtp, a.quanhuyen, a.xaphuong].join(' ').localeCompare([b.tinhtp, b.quanhuyen, b.xaphuong].join(' '), 'vi');
+      if (left !== 0) return left;
+      return (a.nearestKm ?? Number.MAX_SAFE_INTEGER) - (b.nearestKm ?? Number.MAX_SAFE_INTEGER);
+    });
 }
 
 function renderApGroupCards(entries) {
@@ -351,40 +487,92 @@ function renderApGroupCards(entries) {
   if (!container) return;
 
   if (!entries.length) {
-    container.innerHTML = '<div class="text-center py-5 text-muted bg-white rounded shadow-sm">Không có ấp nào phù hợp với bộ lọc hiện tại.</div>';
+    container.innerHTML = '<div class="text-center py-5 text-muted bg-white rounded shadow-sm">Không có xã nào phù hợp với bộ lọc hiện tại.</div>';
     return;
   }
 
   const expandedKey = window.appState.expandedApGroupKey || null;
   const expandedEntry = expandedKey ? entries.find((entry) => entry.key === expandedKey) : null;
 
-  if (expandedEntry) {
-    const customers = (expandedEntry.customers || []).map((customer, index) => buildCustomerCardHtml(customer, index)).join('');
+  if (expandedEntry && expandedEntry.apGroups && expandedEntry.apGroups.length) {
+    const activeChildKey = window.appState.expandedApChildKey || null;
+    const childEntry = activeChildKey ? expandedEntry.apGroups.find((apEntry) => apEntry.key === activeChildKey) : null;
+
+    if (childEntry) {
+      const customers = (childEntry.customers || []).map((customer, index) => buildCustomerCardHtml(customer, index)).join('');
+      container.innerHTML = `
+        <div class="mb-2 d-flex gap-2">
+          <button class="btn btn-sm btn-outline-secondary" type="button" id="backToApGroupBtn">← Quay lại danh sách ấp</button>
+        </div>
+        ${customers}
+      `;
+
+      const backBtn = document.getElementById('backToApGroupBtn');
+      if (backBtn) {
+        backBtn.addEventListener('click', () => {
+          window.appState.expandedApChildKey = null;
+          renderApGroupCards(entries);
+        });
+      }
+      return;
+    }
+
+    const sortedApGroups = [...expandedEntry.apGroups].sort((a, b) => (a.nearestKm ?? Number.MAX_SAFE_INTEGER) - (b.nearestKm ?? Number.MAX_SAFE_INTEGER));
+    const html = sortedApGroups.map((apEntry, index) => {
+      const cardClass = index % 2 === 0 ? 'bg-white' : 'bg-light';
+      const locationText = [apEntry.key, apEntry.xaphuong, apEntry.quanhuyen, apEntry.tinhtp].filter(Boolean).join(' - ');
+      const distanceText = apEntry.nearestKm != null ? `${apEntry.nearestKm.toFixed(1)} km` : 'Không có GPS';
+      return `
+        <div class="customer-card ${cardClass} border-0" data-ap-child="${escapeHtml(apEntry.key)}" style="border-left: 4px solid #198754; border-radius: 10px; margin-bottom: 10px; cursor: pointer;">
+          <div class="d-flex justify-content-between align-items-center gap-2">
+            <div class="flex-grow-1">
+              <div class="fw-bold text-dark">${escapeHtml(apEntry.key)}</div>
+              <div class="small text-secondary">${escapeHtml(locationText)}</div>
+            </div>
+            <div class="text-end">
+              <div class="badge bg-success-subtle text-success border border-success-subtle fw-bold">${apEntry.count} khách</div>
+              <div class="small text-dark fw-bold mt-1">${distanceText}</div>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
     container.innerHTML = `
       <div class="mb-2">
-        <button class="btn btn-sm btn-outline-secondary" type="button" id="backToApListBtn">← Quay lại danh sách ấp</button>
+        <button class="btn btn-sm btn-outline-secondary" type="button" id="backToXaListBtn">← Quay lại danh sách xã</button>
       </div>
-      ${customers}
+      ${html}
     `;
 
-    const backBtn = document.getElementById('backToApListBtn');
+    const backBtn = document.getElementById('backToXaListBtn');
     if (backBtn) {
       backBtn.addEventListener('click', () => {
         window.appState.expandedApGroupKey = null;
+        window.appState.expandedApChildKey = null;
         renderApGroupCards(entries);
       });
     }
+
+    container.querySelectorAll('[data-ap-child]').forEach((card) => {
+      card.addEventListener('click', () => {
+        const apKey = card.getAttribute('data-ap-child');
+        const item = expandedEntry.apGroups.find((entry) => entry.key === apKey);
+        if (!item || !item.customers.length) return;
+        window.appState.expandedApChildKey = apKey;
+        renderApGroupCards(entries);
+      });
+    });
     return;
   }
 
-  const html = entries.map((entry, index) => {
+  const sortedEntries = [...entries].sort((a, b) => (a.nearestKm ?? Number.MAX_SAFE_INTEGER) - (b.nearestKm ?? Number.MAX_SAFE_INTEGER));
+  const html = sortedEntries.map((entry, index) => {
     const cardClass = index % 2 === 0 ? 'bg-white' : 'bg-light';
-    const locationText = entry.type === 'ap_old'
-      ? [entry.key, entry.xaphuong, entry.quanhuyen, entry.tinhtp].filter(Boolean).join(' - ')
-      : [entry.key, entry.xaphuong, entry.tinhtp].filter(Boolean).join(' - ');
+    const locationText = [entry.xaphuong, entry.quanhuyen, entry.tinhtp].filter(Boolean).join(' - ');
     const distanceText = entry.nearestKm != null ? `${entry.nearestKm.toFixed(1)} km` : 'Không có GPS';
     return `
-      <div class="customer-card ${cardClass} border-0" data-ap-group="${escapeHtml(entry.key)}" style="border-left: 4px solid ${entry.type === 'ap_old' ? '#dc3545' : '#fd7e14'}; border-radius: 10px; margin-bottom: 10px; cursor: pointer;">
+      <div class="customer-card ${cardClass} border-0" data-ap-group="${escapeHtml(entry.key)}" style="border-left: 4px solid #0d6efd; border-radius: 10px; margin-bottom: 10px; cursor: pointer;">
         <div class="d-flex justify-content-between align-items-center gap-2">
           <div class="flex-grow-1">
             <div class="fw-bold text-dark">${escapeHtml(entry.key)}</div>
@@ -402,14 +590,16 @@ function renderApGroupCards(entries) {
   container.innerHTML = html;
   container.querySelectorAll('[data-ap-group]').forEach((card) => {
     card.addEventListener('click', () => {
-      const apKey = card.getAttribute('data-ap-group');
-      const items = entries.find((entry) => entry.key === apKey)?.customers || [];
-      if (!items.length) return;
-      window.appState.expandedApGroupKey = apKey;
+      const xaKey = card.getAttribute('data-ap-group');
+      const item = entries.find((entry) => entry.key === xaKey);
+      if (!item || !item.apGroups || !item.apGroups.length) return;
+      window.appState.expandedApGroupKey = xaKey;
+      window.appState.expandedApChildKey = null;
       renderApGroupCards(entries);
     });
   });
 }
+
 
 function filterData() {
   window.appState.currentPage = 1;
@@ -531,17 +721,20 @@ function filterData() {
 }
 
 function updateStats(data) {
-  const total = data.length;
-  const unchecked = data.filter((customer) => {
+  const selectedMonth = normalizeMonthKey(window.appState.selectedMonth || '');
+  const sourceData = Array.isArray(window.appState.allData) ? window.appState.allData.filter((customer) => {
+    const rowMonth = normalizeMonthKey(customer.month || customer['month'] || customer['Kỳ'] || customer['Ky'] || '');
+    return !selectedMonth || rowMonth === selectedMonth;
+  }) : [];
+
+  const total = sourceData.length;
+  const unchecked = sourceData.filter((customer) => {
     const gps = String(customer.Check_GPS || customer['Check_GPS'] || '').trim().toLowerCase();
     const ao = String(customer.Check_Ao || customer['Check_Ao'] || '').trim().toLowerCase();
     return gps === '' && ao === '';
   }).length;
 
-  const todayCheck = data.filter((customer) => {
-    const checkTime = String(customer.Check_Time || customer['Check_Time'] || '').trim();
-    return checkTime !== '';
-  }).length;
+  const todayCheck = sourceData.filter((customer) => hasCheckedToday(customer)).length;
 
   const totalCustEl = document.getElementById('statTotalCust');
   const uncheckedEl = document.getElementById('statUnchecked');
@@ -1262,6 +1455,13 @@ function setApFilterType(type) {
   filterData();
 }
 
+function setApGroupMode(mode) {
+  window.appState.apFilterGroupMode = 'xa';
+  window.appState.expandedApGroupKey = null;
+  window.appState.expandedApChildKey = null;
+  filterData();
+}
+
 function toggleGpsFilterMode() {
   const box = document.getElementById('gpsFilterControlBox');
   const button = document.getElementById('gpsFilterToggleBtn');
@@ -1302,6 +1502,7 @@ function toggleApFilterMode() {
   const nextState = !window.appState.apFilterEnabled;
   window.appState.apFilterEnabled = nextState;
   window.appState.expandedApGroupKey = null;
+  window.appState.expandedApChildKey = null;
   const switchBox = document.getElementById('apFilterModeSwitch');
   if (switchBox) switchBox.classList.toggle('d-none', !nextState);
 
@@ -1340,6 +1541,7 @@ function showToast(message, type) {
 window.toggleGpsFilterMode = toggleGpsFilterMode;
 window.toggleApFilterMode = toggleApFilterMode;
 window.setApFilterType = setApFilterType;
+window.setApGroupMode = setApGroupMode;
 window.syncMonthAndReload = syncMonthAndReload;
 window.filterData = filterData;
 window.updateFilterCount = updateFilterCount;
@@ -1359,7 +1561,9 @@ window.resetFilters = function () {
   window.appState.selectedMonth = '';
   window.appState.gpsFilterEnabled = false;
   window.appState.apFilterEnabled = false;
+  window.appState.apFilterGroupMode = 'xa';
   window.appState.expandedApGroupKey = null;
+  window.appState.expandedApChildKey = null;
   const gpsBox = document.getElementById('gpsFilterControlBox');
   const gpsButton = document.getElementById('gpsFilterToggleBtn');
   const apButton = document.getElementById('apFilterToggleBtn');

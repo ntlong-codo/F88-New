@@ -244,12 +244,15 @@
           <span class="d-none d-sm-inline"> (<span id="activeFilterCount">0</span>)</span>
         </button>
       </div>
-      <div id="apFilterModeSwitch" class="btn-group btn-group-sm shadow-sm d-none" role="group" aria-label="Chọn loại ấp">
-        <button type="button" class="btn btn-warning" id="apFilterTypeOldBtn" onclick="setApFilterType('ap_old')">Ấp cũ</button>
-        <button type="button" class="btn btn-outline-warning" id="apFilterTypeNewBtn" onclick="setApFilterType('ap_new')">Ấp mới</button>
-      </div>
       <div class="input-group shadow-sm compact-search-box">
         <input type="text" id="searchKeyword" class="form-control form-control-sm" placeholder="🔍 Tìm tên, số HĐ..." oninput="filterData()" />
+      </div>
+    </div>
+
+    <div id="apFilterModeSwitch" class="d-none mt-2">
+      <div class="btn-group btn-group-sm shadow-sm w-100" role="group" aria-label="Chọn loại ấp">
+        <button type="button" class="btn btn-warning" id="apFilterTypeOldBtn" onclick="setApFilterType('ap_old')">Ấp cũ</button>
+        <button type="button" class="btn btn-outline-warning" id="apFilterTypeNewBtn" onclick="setApFilterType('ap_new')">Ấp mới</button>
       </div>
     </div>
 
