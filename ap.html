@@ -5,56 +5,146 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>F88 - Đồng Bộ</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
     body { background: #f4f6f9; font-size: 15px; }
     .card { border-radius: 14px; box-shadow: 0 2px 8px rgba(0,0,0,.06); }
     .btn { min-height: 42px; }
+    #apMapCanvas {
+      width: 100%;
+      height: 420px;
+      min-height: 420px;
+      max-height: 420px;
+      overflow: hidden;
+      position: relative;
+      background: #edf2f7;
+    }
+    #apMapCanvas .leaflet-container {
+      width: 100% !important;
+      height: 100% !important;
+      position: relative !important;
+      z-index: 1;
+    }
+    .leaflet-popup { z-index: 1200 !important; }
+    .leaflet-popup-content-wrapper, .leaflet-popup-tip { z-index: 1201 !important; }
+
+    .ap-popup-shell {
+      min-width: 220px;
+      max-width: 260px;
+      font-size: 13px;
+      color: #1f2937;
+    }
+    .ap-popup-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 8px;
+      margin-bottom: 8px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #e5e7eb;
+    }
+    .ap-popup-title {
+      margin: 0;
+      font-weight: 800;
+      color: #0f172a;
+      line-height: 1.3;
+    }
+    .ap-popup-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 10px;
+      font-weight: 700;
+      color: #fff;
+      letter-spacing: 0.02em;
+    }
+    .ap-popup-badge.old { background: #dc2626; }
+    .ap-popup-badge.new { background: #2563eb; }
+    .ap-popup-meta {
+      padding: 8px 10px;
+      border-radius: 10px;
+      background: linear-gradient(180deg, #f8fafc 0%, #eef6ff 100%);
+      border: 1px solid #dbeafe;
+      margin-bottom: 8px;
+    }
+    .ap-popup-meta strong {
+      color: #0f172a;
+    }
+    .ap-popup-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .ap-popup-action {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 7px 10px;
+      border: none;
+      border-radius: 10px;
+      font-size: 12px;
+      font-weight: 700;
+      color: #fff;
+      text-decoration: none;
+      box-shadow: 0 4px 10px rgba(15, 23, 42, 0.12);
+      transition: transform 0.15s ease, opacity 0.15s ease;
+    }
+    .ap-popup-action:hover {
+      transform: translateY(-1px);
+      opacity: 0.96;
+      color: #fff;
+    }
+    .ap-popup-action.route { background: linear-gradient(135deg, #16a34a, #22c55e); }
+    .ap-popup-action.gps { background: linear-gradient(135deg, #2563eb, #3b82f6); }
+    .ap-popup-action.edit { background: linear-gradient(135deg, #d97706, #f59e0b); }
+    .ap-popup-action .action-text { display: inline; }
+
+    @media (max-width: 576px) {
+      .ap-popup-shell {
+        min-width: 180px;
+        max-width: 220px;
+      }
+      .ap-popup-action {
+        width: 38px;
+        height: 38px;
+        padding: 0;
+        border-radius: 50%;
+      }
+      .ap-popup-action .action-text {
+        display: none;
+      }
+    }
   </style>
 </head>
 <body>
   <div class="container py-4">
     <div class="d-flex justify-content-between align-items-center mb-3 bg-white p-3 rounded shadow-sm flex-wrap gap-2">
       <div>
-        <h4 class="mb-0 fw-bold text-warning">🏡 Đồng Bộ F88</h4>
+        <h4 class="mb-0 fw-bold text-warning">🏡 F88</h4>
       </div>
       <div class="d-flex gap-2 flex-wrap">
         <a href="index.html" class="btn btn-primary btn-sm">📋 Danh sách</a>
-        <a href="map.html" class="btn btn-danger btn-sm">🗺️ Bản đồ</a>
-        <a href="payment.html" class="btn btn-success btn-sm">� Khách nguồn</a>
-      </div>
-    </div>
-
-    <div class="row g-3">
-      <div class="col-12 col-lg-6">
-        <div class="card p-3 h-100">
-          <h5 class="fw-bold text-primary mb-3">📊 Đồng bộ dữ liệu</h5>
-          <div class="mb-3">
-            <label class="form-label fw-bold small">Chọn kỳ:</label>
-            <select id="monthSelect" class="form-select"></select>
-          </div>
-          <button id="syncDataBtn" class="btn btn-primary w-100 mb-2" onclick="syncDataFromSheets()">🔄 Đồng bộ dữ liệu từ các sheet kỳ tháng</button>
-          <button id="syncApBtn" class="btn btn-warning w-100 mb-2" onclick="syncAddressToApTabs()">🏡 Đồng bộ & kiểm tra trùng lặp AP</button>
-          <button id="openAddApModalBtn" class="btn btn-outline-danger w-100 mb-2" onclick="openAddApLocationModal()">➕ Thêm vị trí ấp mới</button>
-          <button id="assignGpsBtn" class="btn btn-success w-100" onclick="assignGpsFromApTabs()">📍 Gán GPS từ AP sang khách hàng</button>
-        </div>
-      </div>
-
-      <div class="col-12 col-lg-6">
-        <div class="card p-3 h-100">
-          <h5 class="fw-bold text-success mb-3">🧾 Trạng thái</h5>
-          <div id="statusBox" class="alert alert-secondary mb-0">
-            Chưa có thao tác nào được thực hiện.
-          </div>
-        </div>
+        <a href="map.html" class="btn btn-danger btn-sm">🗺️ Map</a>
+        <a href="ap.html" class="btn btn-warning btn-sm">🏡 Ấp</a>
+        <a href="payment.html" class="btn btn-success btn-sm">💰 Khách Nguồn</a>
+        <a href="sync.html" class="btn btn-info btn-sm text-white">🔄 Đồng Bộ</a>
       </div>
     </div>
 
     <div class="card p-3 mt-4">
       <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
-        <h5 class="fw-bold text-danger mb-0">🏡 Danh sách ấp và GPS</h5>
-        <div class="d-flex gap-2 small text-muted">
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+          <h5 class="fw-bold text-danger mb-0">🏡 Danh sách ấp và GPS</h5>
+          <button id="toggleApListBtn" class="btn btn-outline-primary btn-sm fw-bold" type="button" onclick="toggleApListPanel()">▾ Mở danh sách</button>
+        </div>
+        <div class="d-flex gap-2 small text-muted align-items-center">
           <span class="badge bg-primary">Tổng: <b id="statTotal">0</b></span>
           <span class="badge bg-danger">Chưa GPS: <b id="statNoGps">0</b></span>
+          <button id="openAddApModalBtn" class="btn btn-outline-danger btn-sm fw-bold" type="button" onclick="openAddApLocationModal()">➕ Thêm ấp</button>
         </div>
       </div>
 
@@ -72,7 +162,7 @@
           <input id="searchApKeyword" type="text" class="form-control" placeholder="Tên ấp, xã, huyện..." />
         </div>
         <div class="col-12 col-md-3">
-          <label class="form-label fw-bold small mb-1">Lọc:</label>
+          <label class="form-label fw-bold small mb-1">Lọc danh sách:</label>
           <div class="form-check mt-2">
             <input id="filterNoGps" class="form-check-input" type="checkbox" />
             <label class="form-check-label small" for="filterNoGps">Chỉ ấp chưa GPS</label>
@@ -192,13 +282,19 @@
     let mapPickerObj = null;
     let pickerMarker = null;
     let hasCenteredMapOnCurrentLocation = false;
+    let apRenderTimer = null;
+    let apListExpanded = false;
+    let apDataLoaded = false;
 
     window.apMapState = {
       map: null,
       markersLayer: null,
+      allData: [],
+      filteredData: [],
       markerRegistry: {},
       focusedApKey: null,
-      skipRender: false
+      skipRender: false,
+      hasAppliedBounds: false
     };
 
     function escapeHtml(value) {
@@ -209,53 +305,6 @@
         '"': '&quot;',
         "'": '&#039;'
       }[char]));
-    }
-
-    async function loadMonths() {
-      const select = document.getElementById('monthSelect');
-      const syncSelect = document.getElementById('syncMonthSelect');
-      showToast('Đang tải danh sách kỳ tháng...', 'primary');
-      try {
-        const result = await window.F88_API.fetch('getMonths');
-        const months = Array.isArray(result.months) ? result.months : [];
-        const valid = months.filter((m) => String(m).trim() && String(m).toLowerCase() !== 'ap_new' && String(m).toLowerCase() !== 'ap_old');
-        select.innerHTML = '<option value="">-- Chọn kỳ --</option>';
-        if (syncSelect) syncSelect.innerHTML = '<option value="">⚡ Tất cả các tháng</option>';
-        valid.forEach((month) => {
-          const option = document.createElement('option');
-          option.value = month;
-          option.textContent = 'Kỳ ' + month;
-          select.appendChild(option.cloneNode(true));
-
-          if (syncSelect) {
-            const syncOption = document.createElement('option');
-            syncOption.value = month;
-            syncOption.textContent = 'Kỳ ' + month;
-            syncSelect.appendChild(syncOption);
-          }
-        });
-        showToast('Đã tải danh sách kỳ tháng.', 'success');
-      } catch (error) {
-        setStatus('Lỗi khi tải danh sách kỳ tháng. Kiểm tra lại API.', 'danger');
-        showToast('Lỗi khi tải danh sách kỳ tháng.', 'danger');
-      }
-    }
-
-    async function loadApData() {
-      showToast('Đang tải dữ liệu từ các tab Ấp...', 'primary');
-      try {
-        const json = await window.F88_API.fetch('getApData');
-        if (json && json.success) {
-          allApData.ap_new = Array.isArray(json.ap_new) ? json.ap_new : [];
-          allApData.ap_old = Array.isArray(json.ap_old) ? json.ap_old : [];
-          renderApList();
-          showToast('Đã tải dữ liệu ấp thành công!', 'success');
-        } else {
-          showToast('Lỗi tải dữ liệu ấp!', 'danger');
-        }
-      } catch (error) {
-        showToast('Không thể kết nối đến API ấp!', 'danger');
-      }
     }
 
     function setStatus(message, type) {
@@ -360,10 +409,11 @@
       return !!parseApGpsCoordinates(normalized);
     }
 
-    function getVisibleApEntries() {
+    function getVisibleApEntries(options = {}) {
+      const { applyNoGpsFilter = false } = options;
       const selectTab = document.getElementById('selectTab');
       const keyword = (document.getElementById('searchApKeyword').value || '').toLowerCase();
-      const onlyNoGps = document.getElementById('filterNoGps').checked;
+      const onlyNoGps = document.getElementById('filterNoGps').checked && applyNoGpsFilter;
       const tabValue = selectTab ? selectTab.value : 'all';
       const sources = tabValue === 'all' ? ['ap_new', 'ap_old'] : [tabValue];
 
@@ -379,7 +429,49 @@
           }
         });
       });
+
       return entries;
+    }
+
+    function getApMarkerKey(item) {
+      return `${item.tabName || 'ap'}|${Number(item.rowIndex || 0)}`;
+    }
+
+    function getApMarkerColor(item) {
+      return item && item.tabName === 'ap_old' ? '#d92d2d' : '#0d3b8c';
+    }
+
+    function buildApPopupHtml(item, gps, coords) {
+      const itemAddress = getApAddressText(item, item.tabName || 'ap_new');
+      const kindLabel = item.tabName === 'ap_old' ? 'Ấp cũ' : 'Ấp mới';
+      const googleUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${coords.lat},${coords.lng}`)}`;
+      const rowIndex = Number(item.rowIndex || 0);
+      return `
+        <div class="ap-popup-shell">
+          <div class="ap-popup-header">
+            <div class="ap-popup-title">${escapeHtml(item.ap || 'Ấp')}</div>
+            <span class="ap-popup-badge ${item.tabName === 'ap_old' ? 'old' : 'new'}">${kindLabel}</span>
+          </div>
+          <div class="ap-popup-meta">
+            <div class="mb-1"><strong>Địa chỉ:</strong> ${escapeHtml(itemAddress)}</div>
+            <div><strong>GPS:</strong> ${escapeHtml(gps)}</div>
+          </div>
+          <div class="ap-popup-actions">
+            <a class="ap-popup-action route" href="${googleUrl}" target="_blank" rel="noopener noreferrer" title="Đường đi"><span class="action-emoji">🚗</span><span class="action-text">Đi đến</span></a>
+            <button type="button" class="ap-popup-action gps" onclick="openApGpsModal('${item.tabName}', ${rowIndex}); return false;" title="GPS"><span class="action-emoji">📍</span><span class="action-text">GPS</span></button>
+            <button type="button" class="ap-popup-action edit" onclick="openApEditModal('${item.tabName}', ${rowIndex}); return false;" title="Sửa"><span class="action-emoji">✏️</span><span class="action-text">Sửa</span></button>
+          </div>
+        </div>
+      `;
+    }
+
+    function scheduleApRender() {
+      if (apRenderTimer) {
+        clearTimeout(apRenderTimer);
+      }
+      apRenderTimer = setTimeout(() => {
+        renderApList();
+      }, 120);
     }
 
     function centerMapOnCurrentLocation() {
@@ -405,34 +497,28 @@
         window.apMapState = {
           map: null,
           markersLayer: null,
+          allData: [],
+          filteredData: [],
           markerRegistry: {},
           focusedApKey: null,
-          skipRender: false
+          skipRender: false,
+          hasAppliedBounds: false
         };
       }
 
-      const host = document.getElementById('apMapCanvas');
-      const mapPane = document.querySelector('.leaflet-map-pane');
-      const paneHeight = mapPane ? parseFloat(getComputedStyle(mapPane).height || '0') : 0;
-      const hostHeight = host ? host.clientHeight : 0;
-
-      if (window.apMapState.map && hostHeight > 0 && paneHeight > hostHeight * 4) {
-        window.apMapState.map.remove();
-        window.apMapState.map = null;
-        window.apMapState.markersLayer = null;
-        window.apMapState.markerRegistry = {};
-      }
-
       if (!window.apMapState.map) {
-        window.apMapState.map = L.map('apMapCanvas').setView([10.03, 105.77], 12);
+        const apMap = L.map('apMapCanvas', {
+          zoomControl: true,
+          attributionControl: true
+        }).setView([10.03, 105.77], 12);
+
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
           maxZoom: 19,
           attribution: '&copy; OpenStreetMap'
-        }).addTo(window.apMapState.map);
-      }
+        }).addTo(apMap);
 
-      if (!window.apMapState.markersLayer) {
-        window.apMapState.markersLayer = L.layerGroup().addTo(window.apMapState.map);
+        window.apMapState.map = apMap;
+        window.apMapState.markersLayer = L.layerGroup().addTo(apMap);
       }
 
       window.apMap = window.apMapState.map;
@@ -442,10 +528,29 @@
       setTimeout(() => {
         if (window.apMap) {
           window.apMap.invalidateSize();
-          window.apMap.setView([10.03, 105.77], 12);
         }
-      }, 150);
-      centerMapOnCurrentLocation();
+      }, 120);
+    }
+
+    function getApMarkerIcon(item) {
+      const fillColor = getApMarkerColor(item);
+      return L.divIcon({
+        className: 'ap-pin-marker',
+        html: `
+          <div style="
+            width:18px; height:18px; border-radius:50%;
+            background:${fillColor};
+            border:2px solid rgba(255,255,255,0.95);
+            box-shadow:0 8px 18px rgba(0,0,0,0.22);
+            display:block;
+            position:relative;
+            transform:translateZ(0);
+          "></div>
+        `,
+        iconSize: [18, 18],
+        iconAnchor: [9, 9],
+        popupAnchor: [0, -8]
+      });
     }
 
     function normalizeApGpsString(rawValue) {
@@ -457,25 +562,24 @@
         .replace(/[()]/g, '')
         .replace(/[|]/g, ',')
         .replace(/;/g, ',')
+        .replace(/[°NSEW]/gi, '')
+        .replace(/[^\d,.-]/g, ' ')
         .trim();
 
       if (!value) return '';
 
-      const normalizedText = value.replace(/\s+/g, '');
-      const match = normalizedText.match(/-?\d+(?:[.,]\d+)?[,]-?\d+(?:[.,]\d+)?/);
-      if (match) {
-        const pair = match[0].split(',');
-        const lat = Number(pair[0].replace(/\./g, '.'));
-        const lng = Number(pair[1].replace(/\./g, '.'));
+      const numberMatches = (value.match(/-?\d+(?:[.,]\d+)?/g) || []).map((item) => item.replace(',', '.'));
+      if (numberMatches.length >= 4) {
+        const lat = Number(`${numberMatches[0]}.${numberMatches[1]}`);
+        const lng = Number(`${numberMatches[2]}.${numberMatches[3]}`);
         if (!Number.isNaN(lat) && !Number.isNaN(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
           return `${lat}, ${lng}`;
         }
       }
 
-      const parts = value.split(/[\s,]+/).filter(Boolean);
-      if (parts.length >= 2) {
-        const lat = Number(parts[0]);
-        const lng = Number(parts[1]);
+      if (numberMatches.length >= 2) {
+        const lat = Number(numberMatches[0]);
+        const lng = Number(numberMatches[1]);
         if (!Number.isNaN(lat) && !Number.isNaN(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
           return `${lat}, ${lng}`;
         }
@@ -511,46 +615,28 @@
         return;
       }
 
+      ensureApMap();
+      const markerKey = getApMarkerKey({ ...item, tabName });
+      let marker = window.apMarkerRegistry && window.apMarkerRegistry[markerKey];
+
+      if (!marker) {
+        marker = L.marker([coords.lat, coords.lng], {
+          icon: getApMarkerIcon({ ...item, tabName })
+        }).addTo(window.apMapLayer);
+
+        marker.markerKey = markerKey;
+        window.apMarkerRegistry[markerKey] = marker;
+
+        marker.bindPopup(buildApPopupHtml({ ...item, tabName }, gps, coords));
+      }
+
+      window.apMapState.focusedApKey = markerKey;
+      window.apMap.flyTo([coords.lat, coords.lng], 16, { animate: true, duration: 1.2 });
       setTimeout(() => {
-        ensureApMap();
-        const markerKey = `${tabName}|${Number(rowIndex)}`;
-        let marker = window.apMarkerRegistry && window.apMarkerRegistry[markerKey];
-
-        if (!marker) {
-          const color = item.tabName === 'ap_new' ? '#0d3b8c' : '#d92d2d';
-          marker = L.circleMarker([coords.lat, coords.lng], {
-            radius: 7,
-            color: '#ffffff',
-            weight: 2,
-            fillColor: color,
-            fillOpacity: 1
-          }).addTo(window.apMapLayer);
-
-          marker.markerKey = markerKey;
-          if (window.apMarkerRegistry) {
-            window.apMarkerRegistry[markerKey] = marker;
-          }
-
-          const itemAddress = getApAddressText(item, item.tabName);
-          marker.bindPopup(`
-            <div style="min-width:220px; max-width:260px;">
-              <div class="fw-bold text-primary mb-2">${escapeHtml(item.ap || 'Ấp')}</div>
-              <div class="mb-1"><strong>Địa chỉ:</strong> ${escapeHtml(itemAddress)}</div>
-              <div class="mb-1"><strong>GPS:</strong> ${escapeHtml(gps)}</div>
-            </div>
-          `);
+        if (marker && typeof marker.openPopup === 'function') {
+          marker.openPopup();
         }
-
-        window.apMapState.focusedApKey = markerKey;
-        window.apMapState.skipRender = true;
-        window.apMap.flyTo([coords.lat, coords.lng], 16, { animate: true, duration: 1.2 });
-        setTimeout(() => {
-          if (marker && typeof marker.openPopup === 'function') {
-            marker.openPopup();
-          }
-          window.apMapState.skipRender = false;
-        }, 350);
-      }, 180);
+      }, 250);
     }
 
     function updateApMapStatus(entries) {
@@ -582,6 +668,10 @@
         return;
       }
 
+      const baseEntries = Array.isArray(entries) ? entries : [];
+      const displayEntries = baseEntries.filter((item) => hasApGpsValue(item.gps));
+
+      window.apMapState.filteredData = displayEntries;
       const layer = window.apMapState.markersLayer;
       if (layer) {
         layer.clearLayers();
@@ -589,68 +679,53 @@
       window.apMapState.markerRegistry = {};
       window.apMarkerRegistry = window.apMapState.markerRegistry;
 
-      updateApMapStatus(entries);
-      if (!entries.length) {
+      updateApMapStatus(displayEntries);
+      if (!displayEntries.length) {
         return;
       }
 
-      const markers = [];
-      entries.forEach((item) => {
+      const validMarkers = [];
+      displayEntries.forEach((item) => {
         const gps = normalizeApGpsString(item.gps || '');
         if (!gps) return;
         const coords = parseApGpsCoordinates(gps);
         if (!coords) return;
 
-        const color = item.tabName === 'ap_new' ? '#0d3b8c' : '#d92d2d';
-        const marker = L.circleMarker([coords.lat, coords.lng], {
-          radius: 7,
-          color: '#ffffff',
-          weight: 2,
-          fillColor: color,
-          fillOpacity: 1
+        const marker = L.marker([coords.lat, coords.lng], {
+          icon: getApMarkerIcon(item)
         }).addTo(layer);
 
-        const markerKey = `${item.tabName}|${Number(item.rowIndex || 0)}`;
+        const markerKey = getApMarkerKey(item);
         marker.markerKey = markerKey;
         window.apMapState.markerRegistry[markerKey] = marker;
 
-        const itemAddress = getApAddressText(item, item.tabName);
-        marker.bindPopup(`
-          <div style="min-width:220px; max-width:260px;">
-            <div class="fw-bold text-primary mb-2">${escapeHtml(item.ap || 'Ấp')}</div>
-            <div class="mb-1"><strong>Địa chỉ:</strong> ${escapeHtml(itemAddress)}</div>
-            <div class="mb-1"><strong>GPS:</strong> ${escapeHtml(gps)}</div>
-            <div class="mt-2 d-flex flex-wrap gap-2">
-              <button type="button" class="btn btn-sm btn-success" onclick="captureCurrentApLocation('${item.tabName}', ${Number(item.rowIndex || 0)})">📍 Lấy vị trí hiện tại</button>
-              <button type="button" class="btn btn-sm btn-primary" onclick="openApGpsModal('${item.tabName}', ${Number(item.rowIndex || 0)})">🖱️ Chọn bằng tay</button>
-              <button type="button" class="btn btn-sm btn-warning text-white" onclick="openApEditModal('${item.tabName}', ${Number(item.rowIndex || 0)})">✏️ Sửa tên</button>
-              <button type="button" class="btn btn-sm btn-danger" onclick="deleteApLocation('${item.tabName}', ${Number(item.rowIndex || 0)})">🗑️ Xóa</button>
-            </div>
-          </div>
-        `);
-        markers.push(marker);
+        marker.bindPopup(buildApPopupHtml({ ...item, tabName: item.tabName }, gps, coords));
+        validMarkers.push(marker);
       });
 
-      if (markers.length) {
-        window.apMap.invalidateSize();
-        window.apMap.setView([10.03, 105.77], 12);
-        setTimeout(() => {
-          if (window.apMap) {
+      if (validMarkers.length) {
+        const group = L.featureGroup(validMarkers);
+        const bounds = group.getBounds();
+        if (bounds && typeof bounds.isValid === 'function' && bounds.isValid()) {
+          setTimeout(() => {
             window.apMap.invalidateSize();
-            window.apMap.setView([10.03, 105.77], 12);
-          }
-        }, 200);
+            window.apMap.fitBounds(bounds, { padding: [20, 20] });
+          }, 50);
+        }
       }
     }
 
     function renderApList() {
-      const entries = getVisibleApEntries();
+      const entries = getVisibleApEntries({ applyNoGpsFilter: true });
+      window.apMapState.filteredData = entries;
+      window.apMapState.allData = entries;
+
       const container = document.getElementById('apCardContainer');
       const totalCount = entries.length;
       const noGpsCount = entries.filter((item) => !hasApGpsValue(item.gps)).length;
       document.getElementById('statTotal').innerText = String(totalCount);
       document.getElementById('statNoGps').innerText = String(noGpsCount);
-      renderApMap(entries);
+      renderApMap(getVisibleApEntries({ applyNoGpsFilter: false }));
 
       if (!entries.length) {
         container.innerHTML = '<div class="text-center py-5 text-muted bg-white rounded shadow-sm">Không tìm thấy ấp nào phù hợp.</div>';
@@ -900,110 +975,6 @@
       }
     }
 
-    async function syncDataFromSheets() {
-      const month = document.getElementById('monthSelect').value;
-      setStatus('Đang đồng bộ dữ liệu...', 'secondary');
-      showToast('Đang đồng bộ dữ liệu từ sheet theo kỳ...', 'primary');
-      try {
-        const result = await window.F88_API.post('syncDataFromSheets', { targetMonth: month });
-        setStatus(result.message || 'Đồng bộ dữ liệu thành công.', result.success ? 'success' : 'danger');
-        showToast(result.message || 'Đồng bộ dữ liệu thành công.', result.success ? 'success' : 'danger');
-      } catch (error) {
-        setStatus('Không thể đồng bộ dữ liệu: ' + error.message, 'danger');
-        showToast('Không thể đồng bộ dữ liệu: ' + error.message, 'danger');
-      }
-    }
-
-    async function syncAddressToApTabs() {
-      const month = document.getElementById('monthSelect').value;
-      setStatus('Đang đồng bộ địa chỉ vào AP...', 'secondary');
-      showToast('Đang đồng bộ địa chỉ vào tab Ấp...', 'primary');
-      try {
-        const result = await window.F88_API.post('syncAddressToApTabs', { targetMonth: month });
-        setStatus(result.message || 'Đồng bộ AP thành công.', result.success ? 'success' : 'danger');
-        showToast(result.message || 'Đồng bộ AP thành công.', result.success ? 'success' : 'danger');
-        if (result && result.success) loadApData();
-      } catch (error) {
-        setStatus('Không thể đồng bộ AP: ' + error.message, 'danger');
-        showToast('Không thể đồng bộ AP: ' + error.message, 'danger');
-      }
-    }
-
-    async function assignGpsFromApTabs() {
-      const month = document.getElementById('monthSelect').value;
-      setStatus('Đang gán GPS từ AP...', 'secondary');
-      showToast('Đang gán GPS từ tab Ấp sang khách hàng...', 'primary');
-      try {
-        const result = await window.F88_API.post('assignGpsFromApTabs', { targetMonth: month });
-        setStatus(result.message || 'Gán GPS thành công.', result.success ? 'success' : 'danger');
-        showToast(result.message || 'Gán GPS thành công.', result.success ? 'success' : 'danger');
-        if (result && result.success) loadApData();
-      } catch (error) {
-        setStatus('Không thể gán GPS: ' + error.message, 'danger');
-        showToast('Không thể gán GPS: ' + error.message, 'danger');
-      }
-    }
-
-    async function executeSyncCustomers() {
-      const targetMonth = document.getElementById('syncMonthSelect').value;
-      showToast('Đang đồng bộ thông tin khách hàng...', 'primary');
-      try {
-        const json = await window.F88_API.post('syncDataFromSheets', { targetMonth: targetMonth });
-        showToast(json.message || 'Đồng bộ khách hàng thành công.');
-        loadApData();
-      } catch (error) {
-        showToast('Lỗi đồng bộ khách hàng: ' + error.message, 'danger');
-      }
-    }
-
-    async function executeSyncAddressOnly() {
-      const targetMonth = document.getElementById('syncMonthSelect').value;
-      showToast('Đang quét & chuẩn hóa địa chỉ vào tab Ấp...', 'primary');
-      try {
-        const json = await window.F88_API.post('syncAddressToApTabs', { targetMonth: targetMonth });
-        showToast(json.message || 'Đồng bộ địa chỉ thành công.');
-        loadApData();
-      } catch (error) {
-        showToast('Lỗi đồng bộ địa chỉ: ' + error.message, 'danger');
-      }
-    }
-
-    async function executeEnsureMonthColumns() {
-      const targetMonth = document.getElementById('syncMonthSelect').value;
-      showToast('Đang bổ sung cột thiếu cho tab kỳ tháng...', 'primary');
-      try {
-        const json = await window.F88_API.post('ensureColumnsInMonthTabs', { targetMonth: targetMonth });
-        showToast(json.message || 'Bổ sung cột thành công.');
-      } catch (error) {
-        showToast('Lỗi bổ sung cột: ' + error.message, 'danger');
-      }
-    }
-
-    async function executeRemoveDuplicates() {
-      if (!confirm('Hệ thống sẽ quét và gộp các địa chỉ trùng lặp trong cả 2 tab ap_new và ap_old, ưu tiên giữ lại các dòng đã có GPS. Bạn có chắc chắn muốn chạy?')) return;
-
-      showToast('Đang dọn dẹp các dòng trùng lặp...', 'primary');
-      try {
-        await window.F88_API.post('removeDuplicateAp', { tabName: 'ap_new' });
-        const json = await window.F88_API.post('removeDuplicateAp', { tabName: 'ap_old' });
-        showToast(json.message || 'Đã dọn dẹp dữ liệu ấp.');
-        loadApData();
-      } catch (error) {
-        showToast('Lỗi dọn dẹp ấp: ' + error.message, 'danger');
-      }
-    }
-
-    async function executeAssignGps() {
-      showToast('Đang gán ngược GPS từ tab Ấp...', 'primary');
-      try {
-        const json = await window.F88_API.post('assignGpsFromApTabs', {});
-        showToast(json.message || 'Gán ngược GPS thành công.');
-        loadApData();
-      } catch (error) {
-        showToast('Lỗi gán ngược GPS: ' + error.message, 'danger');
-      }
-    }
-
     function showToast(msg, type = 'success') {
       const c = document.getElementById('statusBox');
       if (c) {
@@ -1017,33 +988,108 @@
       setTimeout(() => document.getElementById(id)?.remove(), 2500);
     }
 
+    function setApListPanelState(openState) {
+      const btn = document.getElementById('toggleApListBtn');
+      const container = document.getElementById('apCardContainer');
+      apListExpanded = openState;
+
+      if (btn) {
+        btn.textContent = apListExpanded ? '▴ Ẩn danh sách' : '▾ Mở danh sách';
+        btn.classList.toggle('btn-outline-primary', !apListExpanded);
+        btn.classList.toggle('btn-primary', apListExpanded);
+      }
+
+      if (container) {
+        container.style.display = apListExpanded ? 'grid' : 'none';
+      }
+
+      if (apListExpanded && !apDataLoaded) {
+        loadApData({ force: true });
+      }
+
+      if (openState && apDataLoaded) {
+        renderApList();
+      }
+    }
+
+    function toggleApListPanel() {
+      setApListPanelState(!apListExpanded);
+    }
+
+    async function loadApData(options = {}) {
+      const { force = false, loadList = true } = options;
+      const shouldLoadList = loadList && apListExpanded;
+
+      if (!force && !shouldLoadList && !loadList) {
+        apDataLoaded = false;
+        const container = document.getElementById('apCardContainer');
+        if (container) {
+          container.innerHTML = '<div class="text-center py-5 text-muted bg-light rounded border">Danh sách ấp đang được đóng. Nhấn “Mở danh sách” để tải dữ liệu.</div>';
+        }
+        return;
+      }
+
+      if (shouldLoadList || loadList === false) {
+        showToast('Đang tải dữ liệu từ các tab Ấp...', 'primary');
+      }
+      try {
+        const json = await window.F88_API.fetch('getApData');
+        if (json && json.success) {
+          allApData.ap_new = Array.isArray(json.ap_new) ? json.ap_new : [];
+          allApData.ap_old = Array.isArray(json.ap_old) ? json.ap_old : [];
+          apDataLoaded = true;
+
+          if (apListExpanded && shouldLoadList) {
+            renderApList();
+          } else if (!apListExpanded) {
+            renderApMap(getVisibleApEntries({ applyNoGpsFilter: false }));
+          }
+
+          if (shouldLoadList) {
+            showToast('Đã tải dữ liệu ấp thành công!', 'success');
+          }
+        } else {
+          showToast('Lỗi tải dữ liệu ấp!', 'danger');
+        }
+      } catch (error) {
+        showToast('Không thể kết nối đến API ấp!', 'danger');
+      }
+    }
+
     async function initializePage() {
-      await loadMonths();
-      await loadApData();
+      apListExpanded = false;
+      apDataLoaded = false;
 
       const selectTab = document.getElementById('selectTab');
       const searchInput = document.getElementById('searchApKeyword');
       const filterNoGps = document.getElementById('filterNoGps');
       const newApGpsInput = document.getElementById('newApGps');
       const saveBtn = document.getElementById('saveNewApLocationBtn');
-      const apMapPanel = document.getElementById('apMapPanel');
 
-      if (selectTab) selectTab.addEventListener('change', renderApList);
-      if (searchInput) searchInput.addEventListener('input', renderApList);
-      if (filterNoGps) filterNoGps.addEventListener('change', renderApList);
+      if (selectTab) selectTab.addEventListener('change', scheduleApRender);
+      if (searchInput) searchInput.addEventListener('input', scheduleApRender);
+      if (filterNoGps) filterNoGps.addEventListener('change', scheduleApRender);
       if (newApGpsInput && saveBtn) {
         newApGpsInput.addEventListener('input', () => {
           saveBtn.disabled = !newApGpsInput.value.trim();
         });
       }
       toggleApInsertFields();
+      setApListPanelState(false);
+      const container = document.getElementById('apCardContainer');
+      if (container) {
+        container.innerHTML = '<div class="text-center py-5 text-muted bg-light rounded border">Danh sách ấp đang được đóng. Nhấn “Mở danh sách” để tải dữ liệu.</div>';
+      }
       setTimeout(() => {
         ensureApMap();
-        renderApList();
-        if (window.apMap) {
-          window.apMap.invalidateSize();
-          window.apMap.setView([10.03, 105.77], 12);
-        }
+        loadApData({ force: true, loadList: false }).finally(() => {
+          setTimeout(() => {
+            if (window.apMap) {
+              window.apMap.invalidateSize();
+              window.apMap.setView([10.03, 105.77], 12);
+            }
+          }, 300);
+        });
       }, 200);
     }
 

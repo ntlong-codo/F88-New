@@ -480,29 +480,27 @@ function buildCustomerPopupHtml(customer) {
     getObjectValueByAnyKey(customer, ['WARD_HO_KHAU', 'ward_ho_khau', 'WARD_TAM_TRU', 'ward_tam_tru']),
     getObjectValueByAnyKey(customer, ['WARD_TAM_TRU', 'ward_tam_tru'])
   ].filter(Boolean).join(' • ') || 'Chưa có địa chỉ';
-  const apNew = getObjectValueByAnyKey(customer, ['WARD_HO_KHAU_AP_NEW', 'ward_ho_khau_ap_new']) || 'Chưa có';
-  const apOld = getObjectValueByAnyKey(customer, ['WARD_HO_KHAU_AP_OLD', 'ward_ho_khau_ap_old']) || 'Chưa có';
+  const apNew = getObjectValueByAnyKey(customer, ['WARD_HO_KHAU_AP_NEW', 'ward_ho_khau_ap_new']) || '';
+  const apOld = getObjectValueByAnyKey(customer, ['WARD_HO_KHAU_AP_OLD', 'ward_ho_khau_ap_old']) || '';
   const note = getObjectValueByAnyKey(customer, ['Ghi_chu', 'ghi_chu']) || '';
   const noteHtml = note ? `<div class="mb-2"><strong>Ghi chú:</strong> ${escapeHtml(note)}</div>` : '';
-  const gpsInfo = getCustomerGpsEntries(customer);
-  const gpsHtml = gpsInfo.length
-    ? gpsInfo.map((entry) => `
-        <div style="display:flex; justify-content:space-between; gap:8px; align-items:center; margin-top:4px; cursor:pointer;" onclick="focusCustomerGps(${rowIndex}, '${entry.key}')">
-          <small><strong>${escapeHtml(entry.label)}:</strong> ${escapeHtml(entry.raw)}</small>
-        </div>
-      `).join('')
-    : '<small class="text-muted">Chưa có GPS</small>';
+  const distance = getCustomerDistanceText(customer);
+  const apLines = [
+    apNew ? `<div class="mb-1"><strong>Ấp New:</strong> ${escapeHtml(apNew)}</div>` : '',
+    apOld ? `<div class="mb-1"><strong>Ấp Old:</strong> ${escapeHtml(apOld)}</div>` : ''
+  ].filter(Boolean).join('');
 
   return `
-    <div style="min-width:240px; max-width:290px;">
-      <div class="fw-bold text-primary mb-2">${escapeHtml(name)}</div>
+    <div style="min-width:240px; max-width:290px; position:relative; padding-top:4px;">
+      <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:8px; margin-bottom:6px;">
+        <div class="fw-bold text-primary" style="font-size:14px; line-height:1.3;">${escapeHtml(name)}</div>
+        <div style="font-size:11px; color:#0d6efd; white-space:nowrap; margin-left:auto;">📍 ${escapeHtml(distance)}</div>
+      </div>
       ${noteHtml}
       <div class="mb-1"><strong>HĐ:</strong> ${escapeHtml(soHd)}</div>
       <div class="mb-1"><strong>Địa chỉ:</strong> ${escapeHtml(diaChi)}</div>
-      <div class="mb-1"><strong>Ấp New:</strong> ${escapeHtml(apNew)}</div>
-      <div class="mb-1"><strong>Ấp Old:</strong> ${escapeHtml(apOld)}</div>
-      <div class="mb-2">${gpsHtml}</div>
-      <div class="d-flex flex-wrap gap-2">
+      ${apLines ? `<div class="mb-2">${apLines}</div>` : ''}
+      <div class="d-flex flex-wrap gap-2 justify-content-center">
         <button type="button" class="btn btn-sm btn-success" onclick="window.doMapCustomerCheckGps(${rowIndex}, '${escapeHtml(soHd)}')">📍 Check GPS</button>
         <button type="button" class="btn btn-sm btn-warning text-white" onclick="window.doMapCustomerCheckAo(${rowIndex}, '${escapeHtml(soHd)}')">🛡️ Check ảo</button>
         <button type="button" class="btn btn-sm btn-primary" onclick="window.openCustomerDirections(${rowIndex})">🧭 Chỉ đường</button>
@@ -667,16 +665,23 @@ function renderMapMarkers(data) {
       window.mapState.markerRegistry[markerKey] = marker;
       const note = getObjectValueByAnyKey(customer, ['Ghi_chu', 'ghi_chu']) || '';
       const noteHtml = note ? `<div class="mb-1"><strong>Ghi chú:</strong> ${escapeHtml(note)}</div>` : '';
+      const apNew = getObjectValueByAnyKey(customer, ['WARD_HO_KHAU_AP_NEW', 'ward_ho_khau_ap_new']) || '';
+      const apOld = getObjectValueByAnyKey(customer, ['WARD_HO_KHAU_AP_OLD', 'ward_ho_khau_ap_old']) || '';
+      const apLines = [
+        apNew ? `<div class="mb-1"><strong>Ấp New:</strong> ${escapeHtml(apNew)}</div>` : '',
+        apOld ? `<div class="mb-1"><strong>Ấp Old:</strong> ${escapeHtml(apOld)}</div>` : ''
+      ].filter(Boolean).join('');
+      const distanceText = entry.distanceKm !== null ? `${entry.distanceKm.toFixed(1)} km` : 'Không xác định';
       marker.bindPopup(`
-        <div style="min-width:240px; max-width:290px;">
-          <div class="fw-bold text-primary mb-2">${escapeHtml(getObjectValueByAnyKey(customer, ['Ten_khach_hang', 'ten_khach_hang']) || 'Khách hàng')}</div>
+        <div style="min-width:240px; max-width:290px; position:relative; padding-top:4px;">
+          <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:8px; margin-bottom:6px;">
+            <div class="fw-bold text-primary" style="font-size:14px; line-height:1.3;">${escapeHtml(getObjectValueByAnyKey(customer, ['Ten_khach_hang', 'ten_khach_hang']) || 'Khách hàng')}</div>
+            <div style="font-size:11px; color:#0d6efd; white-space:nowrap; margin-left:auto;">📍 ${escapeHtml(distanceText)}</div>
+          </div>
           ${noteHtml}
           <div class="mb-1"><strong>Địa chỉ:</strong> ${escapeHtml([getObjectValueByAnyKey(customer, ['WARD_HO_KHAU', 'ward_ho_khau']), getObjectValueByAnyKey(customer, ['WARD_TAM_TRU', 'ward_tam_tru'])].filter(Boolean).join(' • ') || 'Chưa có địa chỉ')}</div>
-          <div class="mb-1"><strong>Ấp New:</strong> ${escapeHtml(getObjectValueByAnyKey(customer, ['WARD_HO_KHAU_AP_NEW', 'ward_ho_khau_ap_new']) || 'Chưa có')}</div>
-          <div class="mb-1"><strong>Ấp Old:</strong> ${escapeHtml(getObjectValueByAnyKey(customer, ['WARD_HO_KHAU_AP_OLD', 'ward_ho_khau_ap_old']) || 'Chưa có')}</div>
-          <div class="mb-1"><strong>${escapeHtml(entry.label)}:</strong> ${escapeHtml(entry.raw)}</div>
-          <div class="mb-1"><strong>Khoảng cách:</strong> ${entry.distanceKm !== null ? `${entry.distanceKm.toFixed(1)} km` : 'Không xác định'}</div>
-          <div class="mt-2 d-flex flex-wrap gap-2">
+          ${apLines ? `<div class="mb-2">${apLines}</div>` : ''}
+          <div class="mt-2 d-flex flex-wrap gap-2 justify-content-center">
             <button type="button" class="btn btn-sm btn-success" onclick="window.doMapCustomerCheckGps(${customer.rowIndex || customer['rowIndex'] || index + 2}, '${escapeHtml(getObjectValueByAnyKey(customer, ['so_hd', 'SO_HD', 'So_HD']) || '---')}')">📍 Check GPS</button>
             <button type="button" class="btn btn-sm btn-warning text-white" onclick="window.doMapCustomerCheckAo(${customer.rowIndex || customer['rowIndex'] || index + 2}, '${escapeHtml(getObjectValueByAnyKey(customer, ['so_hd', 'SO_HD', 'So_HD']) || '---')}')">🛡️ Check ảo</button>
             <button type="button" class="btn btn-sm btn-primary" onclick="window.openCustomerDirections(${customer.rowIndex || customer['rowIndex'] || index + 2})">🧭 Chỉ đường</button>

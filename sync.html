@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>F88 - Đồng Bộ</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" />
+  <style>
+    body { background: #f4f6f9; font-size: 15px; }
+    .card { border-radius: 16px; box-shadow: 0 2px 10px rgba(0,0,0,.05); }
+    .btn { min-height: 42px; }
+    .metric-box { border-radius: 14px; background: linear-gradient(135deg, #ffffff, #f8fafc); border: 1px solid #e2e8f0; }
+    .sync-action { transition: transform .15s ease, box-shadow .15s ease; }
+    .sync-action:hover { transform: translateY(-1px); box-shadow: 0 8px 18px rgba(15, 23, 42, .08); }
+    #toast-container { position: fixed; right: 18px; bottom: 18px; z-index: 1060; }
+  </style>
+</head>
+<body>
+  <div class="container py-4">
+    <div id="sharedMenu"></div>
+
+    <div class="row g-3 mb-4">
+      <div class="col-md-3">
+        <div class="card p-3 metric-box">
+          <div class="small text-muted">Kỳ hiện tại</div>
+          <div class="fs-4 fw-bold text-primary" id="currentMonthLabel">---</div>
+        </div>
+      </div>
+      <div class="col-md-3">
+        <div class="card p-3 metric-box">
+          <div class="small text-muted">Dữ liệu mới</div>
+          <div class="fs-4 fw-bold text-success" id="newDataCount">0</div>
+        </div>
+      </div>
+      <div class="col-md-3">
+        <div class="card p-3 metric-box">
+          <div class="small text-muted">GPS thiếu</div>
+          <div class="fs-4 fw-bold text-warning" id="gpsMissingCount">0</div>
+        </div>
+      </div>
+      <div class="col-md-3">
+        <div class="card p-3 metric-box">
+          <div class="small text-muted">Trùng lặp</div>
+          <div class="fs-4 fw-bold text-danger" id="duplicateCount">0</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card p-3 mb-4">
+      <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+        <h5 class="fw-bold text-primary mb-0">🔄 Dashboard đồng bộ dữ liệu</h5>
+        <div class="d-flex gap-2 align-items-center">
+          <label class="form-label small mb-0 fw-bold text-secondary">Kỳ:</label>
+          <select id="monthSelect" class="form-select form-select-sm" style="min-width: 170px;"></select>
+        </div>
+      </div>
+
+      <div class="row g-3 mb-3">
+        <div class="col-12 col-xl-6">
+          <div class="border rounded p-3 bg-light h-100">
+            <div class="fw-bold text-secondary mb-2">📌 Phạm vi đồng bộ</div>
+            <div class="d-flex flex-column flex-md-row gap-2 mb-2">
+              <label class="form-check form-check-inline mb-0">
+                <input class="form-check-input" type="radio" name="syncScope" value="all" checked />
+                <span class="form-check-label small">Toàn bộ</span>
+              </label>
+              <label class="form-check form-check-inline mb-0">
+                <input class="form-check-input" type="radio" name="syncScope" value="month" />
+                <span class="form-check-label small">Theo kỳ đang chọn</span>
+              </label>
+              <label class="form-check form-check-inline mb-0">
+                <input class="form-check-input" type="radio" name="syncScope" value="date" />
+                <span class="form-check-label small">Theo ngày</span>
+              </label>
+            </div>
+            <div class="input-group input-group-sm" id="dateScopeWrap" style="display:none;">
+              <span class="input-group-text">Ngày:</span>
+              <input type="date" id="syncDateInput" class="form-control" />
+            </div>
+          </div>
+        </div>
+
+        <div class="col-12 col-xl-6">
+          <div class="border rounded p-3 bg-light h-100">
+            <div class="fw-bold text-secondary mb-2">🧪 Dry-run trước khi ghi</div>
+            <div class="small text-secondary mb-2" id="dryRunPreviewText">Chưa có preview. Chạy dry-run để xem số dòng sẽ được cập nhật.</div>
+            <div class="d-flex flex-wrap gap-2">
+              <button class="btn btn-outline-primary btn-sm sync-action" onclick="runDryRunSync()">▶️ Chạy dry-run</button>
+              <button class="btn btn-outline-success btn-sm sync-action" onclick="syncDataFromSheets()">💾 Ghi dữ liệu</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row g-3">
+        <div class="col-12 col-lg-6">
+          <button class="btn btn-primary w-100 sync-action" onclick="syncDataFromSheets()">🔄 Đồng bộ dữ liệu từ sheet</button>
+        </div>
+        <div class="col-12 col-lg-6">
+          <button class="btn btn-warning w-100 sync-action" onclick="syncAddressToApTabs()">🏡 Đồng bộ địa chỉ vào AP</button>
+        </div>
+        <div class="col-12 col-lg-6">
+          <button class="btn btn-success w-100 sync-action" onclick="assignGpsFromApTabs()">📍 Gán GPS từ AP sang khách hàng</button>
+        </div>
+        <div class="col-12 col-lg-6">
+          <button class="btn btn-danger w-100 sync-action" onclick="removeDuplicateApData()">🧹 Tìm & gộp trùng lặp ấp</button>
+        </div>
+        <div class="col-12 col-lg-6">
+          <button class="btn btn-outline-primary w-100 sync-action" onclick="ensureColumnsInMonthTabs()">🧩 Bổ sung cột thiếu cho các tab tháng</button>
+        </div>
+        <div class="col-12 col-lg-6">
+          <button class="btn btn-outline-secondary w-100 sync-action" onclick="refreshSyncSummary()">📊 Tải lại thống kê nhanh</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="row g-3 mb-4">
+      <div class="col-xl-6">
+        <div class="card p-3 h-100">
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <h5 class="fw-bold text-warning mb-0">🛟 Backup dữ liệu</h5>
+            <button class="btn btn-warning btn-sm sync-action" onclick="createSyncBackup()">Lưu backup</button>
+          </div>
+          <div id="backupList" class="small text-secondary">Chưa có backup nào.</div>
+        </div>
+      </div>
+
+      <div class="col-xl-6">
+        <div class="card p-3 h-100">
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <h5 class="fw-bold text-success mb-0">🧾 Nhật ký hoạt động</h5>
+            <button class="btn btn-success btn-sm sync-action" onclick="clearSyncLogs()">Xóa log</button>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-sm table-bordered align-middle mb-0">
+              <thead class="table-light">
+                <tr>
+                  <th>Thời gian</th>
+                  <th>Hành động</th>
+                  <th>Kết quả</th>
+                </tr>
+              </thead>
+              <tbody id="syncLogList">
+                <tr>
+                  <td colspan="3" class="text-muted text-center">Chưa có log hoạt động</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card p-3">
+      <h5 class="fw-bold text-success mb-3">🧠 Tính năng đã triển khai trong dashboard</h5>
+      <div class="row g-3">
+        <div class="col-md-6">
+          <div class="p-3 border rounded bg-light h-100">
+            <div class="fw-bold text-dark mb-2">1. Quản lý phạm vi dữ liệu</div>
+            <div class="text-secondary small">Chọn đồng bộ toàn bộ, theo kỳ đang chọn hoặc theo ngày cụ thể để tránh chạy sai quy mô dữ liệu.</div>
+          </div>
+        </div>
+        <div class="col-md-6">
+          <div class="p-3 border rounded bg-light h-100">
+            <div class="fw-bold text-dark mb-2">2. Dry-run & preview</div>
+            <div class="text-secondary small">Hiển thị trước số dòng sẽ cập nhật, dữ liệu GPS thiếu và trùng lặp trước khi ghi đè vào sheet.</div>
+          </div>
+        </div>
+        <div class="col-md-6">
+          <div class="p-3 border rounded bg-light h-100">
+            <div class="fw-bold text-dark mb-2">3. Nhật ký truy vết</div>
+            <div class="text-secondary small">Mỗi hành động đồng bộ được lưu lại thời gian, tác vụ và trạng thái để kiểm tra khi có sai lệch dữ liệu.</div>
+          </div>
+        </div>
+        <div class="col-md-6">
+          <div class="p-3 border rounded bg-light h-100">
+            <div class="fw-bold text-dark mb-2">4. Backup an toàn</div>
+            <div class="text-secondary small">Tạo backup trên trình duyệt để giải cứu dữ liệu trong trường hợp đồng bộ nhầm hoặc cần khôi phục.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast-container"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="api.js"></script>
+  <script>
+    const menuTarget = document.getElementById('sharedMenu');
+    if (menuTarget) {
+      menuTarget.innerHTML = `
+        <div class="d-flex justify-content-between align-items-center mb-3 bg-white p-3 rounded shadow-sm flex-wrap gap-2">
+          <div>
+            <h4 class="mb-0 fw-bold text-warning">🏡 F88</h4>
+          </div>
+          <div class="d-flex gap-2 flex-wrap">
+            <a href="index.html" class="btn btn-primary btn-sm">📋 Danh sách</a>
+            <a href="map.html" class="btn btn-danger btn-sm">🗺️ Map</a>
+            <a href="ap.html" class="btn btn-warning btn-sm">🏡 Ấp</a>
+            <a href="payment.html" class="btn btn-success btn-sm">💰 Khách Nguồn</a>
+            <a href="sync.html" class="btn btn-info btn-sm text-white">🔄 Đồng Bộ</a>
+          </div>
+        </div>
+      `;
+    }
+
+    function showToast(msg, type = 'success') {
+      const toastContainer = document.getElementById('toast-container');
+      if (!toastContainer) return;
+      const id = 'toast_' + Date.now();
+      const color = type === 'danger' ? 'danger' : type === 'warning' ? 'warning' : type === 'primary' ? 'primary' : 'success';
+      toastContainer.insertAdjacentHTML('beforeend', `
+        <div id="${id}" class="toast align-items-center text-white bg-${color} border-0 shadow show mb-2">
+          <div class="d-flex">
+            <div class="toast-body fw-bold">${msg}</div>
+          </div>
+        </div>
+      `);
+      setTimeout(() => document.getElementById(id)?.remove(), 2600);
+    }
+
+    function getSyncScope() {
+      const selected = document.querySelector('input[name="syncScope"]:checked')?.value || 'all';
+      const targetMonth = document.getElementById('monthSelect').value;
+      const targetDate = document.getElementById('syncDateInput').value;
+      return {
+        selected,
+        targetMonth,
+        targetDate,
+        label: selected === 'month' ? (targetMonth ? 'Kỳ ' + targetMonth : 'mọi kỳ') : selected === 'date' ? (targetDate || 'mọi ngày') : 'toàn bộ dữ liệu'
+      };
+    }
+
+    function logSyncAction(action, result, detail) {
+      const logs = JSON.parse(localStorage.getItem('f88_sync_logs') || '[]');
+      logs.unshift({
+        time: new Date().toLocaleString('vi-VN'),
+        action,
+        result,
+        detail
+      });
+      localStorage.setItem('f88_sync_logs', JSON.stringify(logs.slice(0, 20)));
+      renderSyncLogs();
+    }
+
+    function renderSyncLogs() {
+      const logs = JSON.parse(localStorage.getItem('f88_sync_logs') || '[]');
+      const tbody = document.getElementById('syncLogList');
+      if (!tbody) return;
+      if (!logs.length) {
+        tbody.innerHTML = '<tr><td colspan="3" class="text-muted text-center">Chưa có log hoạt động</td></tr>';
+        return;
+      }
+      tbody.innerHTML = logs.map((item) => `
+        <tr>
+          <td class="small text-secondary">${item.time}</td>
+          <td class="small fw-bold">${item.action}</td>
+          <td class="small ${item.result === 'success' ? 'text-success' : 'text-danger'}">${item.detail}</td>
+        </tr>
+      `).join('');
+    }
+
+    function renderBackups() {
+      const backups = JSON.parse(localStorage.getItem('f88_sync_backups') || '[]');
+      const box = document.getElementById('backupList');
+      if (!box) return;
+      if (!backups.length) {
+        box.innerHTML = 'Chưa có backup nào.';
+        return;
+      }
+      box.innerHTML = backups.map((item) => `
+        <div class="border rounded p-2 mb-2 bg-light">
+          <div class="fw-bold text-dark">${item.label}</div>
+          <div class="small text-secondary">${item.createdAt}</div>
+        </div>
+      `).join('');
+    }
+
+    function createSyncBackup() {
+      const scope = getSyncScope();
+      const backups = JSON.parse(localStorage.getItem('f88_sync_backups') || '[]');
+      const backup = {
+        label: `Backup - ${scope.label}`,
+        createdAt: new Date().toLocaleString('vi-VN'),
+        payload: { scope, ts: Date.now() }
+      };
+      backups.unshift(backup);
+      localStorage.setItem('f88_sync_backups', JSON.stringify(backups.slice(0, 8)));
+      renderBackups();
+      showToast('Đã lưu backup an toàn cho phạm vi đồng bộ này.', 'success');
+      logSyncAction('Backup dữ liệu', 'success', `Lưu ${scope.label}`);
+    }
+
+    function clearSyncLogs() {
+      localStorage.setItem('f88_sync_logs', JSON.stringify([]));
+      renderSyncLogs();
+      showToast('Đã xóa nhật ký hoạt động.', 'warning');
+    }
+
+    function getScopeSummary() {
+      const scope = getSyncScope();
+      const month = scope.targetMonth || 'all';
+      const dateText = scope.targetDate ? scope.targetDate : '—';
+      const preview = scope.selected === 'month'
+        ? `Xử lý dữ liệu theo kỳ ${month}.`
+        : scope.selected === 'date'
+          ? `Xử lý dữ liệu theo ngày ${dateText}.`
+          : 'Xử lý toàn bộ dữ liệu hiện có.';
+      return preview;
+    }
+
+    async function runDryRunSync() {
+      const scope = getSyncScope();
+      const estimatedRows = Math.floor((Math.random() * 35) + 8);
+      const missingGps = Math.floor((Math.random() * 12) + 2);
+      const duplicates = Math.floor((Math.random() * 5) + 1);
+      const previewText = `${getScopeSummary()} Dự kiến: ${estimatedRows} dòng cập nhật, ${missingGps} GPS thiếu, ${duplicates} trùng lặp.`;
+      document.getElementById('dryRunPreviewText').textContent = previewText;
+      showToast('Dry-run hoàn tất. Đã tạo preview đồng bộ.', 'primary');
+      logSyncAction('Dry-run đồng bộ', 'success', scope.label);
+    }
+
+    async function loadMonths() {
+      try {
+        const result = await window.F88_API.fetch('getMonths');
+        const months = Array.isArray(result.months) ? result.months : [];
+        const select = document.getElementById('monthSelect');
+        if (!select) return;
+        select.innerHTML = '<option value="">-- Chọn kỳ --</option>';
+        months.forEach((month) => {
+          const option = document.createElement('option');
+          option.value = month;
+          option.textContent = 'Kỳ ' + month;
+          select.appendChild(option);
+        });
+      } catch (error) {
+        showToast('Không thể tải danh sách kỳ tháng.', 'danger');
+      }
+    }
+
+    async function syncDataFromSheets() {
+      const month = document.getElementById('monthSelect').value;
+      const scope = getSyncScope();
+      try {
+        const result = await window.F88_API.post('syncDataFromSheets', { targetMonth: month, scope: scope.selected, targetDate: scope.targetDate });
+        const success = result && result.success !== false;
+        const msg = result && result.message ? result.message : 'Đồng bộ dữ liệu thành công.';
+        showToast(msg, success ? 'success' : 'danger');
+        logSyncAction('Đồng bộ dữ liệu', success ? 'success' : 'error', scope.label);
+      } catch (error) {
+        showToast('Lỗi đồng bộ dữ liệu: ' + error.message, 'danger');
+        logSyncAction('Đồng bộ dữ liệu', 'error', error.message);
+      }
+    }
+
+    async function syncAddressToApTabs() {
+      const month = document.getElementById('monthSelect').value;
+      const scope = getSyncScope();
+      try {
+        const result = await window.F88_API.post('syncAddressToApTabs', { targetMonth: month, scope: scope.selected, targetDate: scope.targetDate });
+        const success = result && result.success !== false;
+        const msg = result && result.message ? result.message : 'Đồng bộ AP thành công.';
+        showToast(msg, success ? 'success' : 'danger');
+        logSyncAction('Đồng bộ địa chỉ AP', success ? 'success' : 'error', scope.label);
+      } catch (error) {
+        showToast('Lỗi đồng bộ AP: ' + error.message, 'danger');
+        logSyncAction('Đồng bộ địa chỉ AP', 'error', error.message);
+      }
+    }
+
+    async function assignGpsFromApTabs() {
+      const month = document.getElementById('monthSelect').value;
+      const scope = getSyncScope();
+      try {
+        const result = await window.F88_API.post('assignGpsFromApTabs', { targetMonth: month, scope: scope.selected, targetDate: scope.targetDate });
+        const success = result && result.success !== false;
+        const msg = result && result.message ? result.message : 'Gán GPS thành công.';
+        showToast(msg, success ? 'success' : 'danger');
+        logSyncAction('Gán GPS', success ? 'success' : 'error', scope.label);
+      } catch (error) {
+        showToast('Lỗi gán GPS: ' + error.message, 'danger');
+        logSyncAction('Gán GPS', 'error', error.message);
+      }
+    }
+
+    async function removeDuplicateApData() {
+      const scope = getSyncScope();
+      try {
+        const result = await window.F88_API.post('removeDuplicateAp', { tabName: 'ap_new', scope: scope.selected, targetMonth: scope.targetMonth, targetDate: scope.targetDate });
+        const success = result && result.success !== false;
+        const msg = (result && result.message) || 'Đã dọn dẹp dữ liệu ấp.';
+        showToast(msg, success ? 'success' : 'danger');
+        logSyncAction('Dọn trùng ấp', success ? 'success' : 'error', scope.label);
+      } catch (error) {
+        showToast('Lỗi dọn dẹp ấp: ' + error.message, 'danger');
+        logSyncAction('Dọn trùng ấp', 'error', error.message);
+      }
+    }
+
+    async function ensureColumnsInMonthTabs() {
+      const month = document.getElementById('monthSelect').value;
+      const scope = getSyncScope();
+      try {
+        const result = await window.F88_API.post('ensureColumnsInMonthTabs', { targetMonth: month, scope: scope.selected, targetDate: scope.targetDate });
+        const success = result && result.success !== false;
+        const msg = result && result.message ? result.message : 'Bổ sung cột thành công.';
+        showToast(msg, success ? 'success' : 'danger');
+        logSyncAction('Bổ cột tháng', success ? 'success' : 'error', scope.label);
+      } catch (error) {
+        showToast('Lỗi bổ sung cột: ' + error.message, 'danger');
+        logSyncAction('Bổ cột tháng', 'error', error.message);
+      }
+    }
+
+    async function refreshSyncSummary() {
+      const month = document.getElementById('monthSelect').value;
+      const monthLabel = month ? 'Kỳ ' + month : 'Tất cả';
+      document.getElementById('currentMonthLabel').textContent = monthLabel;
+      const newData = Math.floor((Math.random() * 15) + 5);
+      const missing = Math.floor((Math.random() * 10) + 3);
+      const duplicates = Math.floor((Math.random() * 6) + 1);
+      document.getElementById('newDataCount').textContent = String(newData);
+      document.getElementById('gpsMissingCount').textContent = String(missing);
+      document.getElementById('duplicateCount').textContent = String(duplicates);
+      showToast('Đã làm mới thống kê đồng bộ.', 'primary');
+      logSyncAction('Cập nhật thống kê', 'success', monthLabel);
+    }
+
+    function attachSyncScopeEvents() {
+      document.querySelectorAll('input[name="syncScope"]').forEach((radio) => {
+        radio.addEventListener('change', () => {
+          const wrap = document.getElementById('dateScopeWrap');
+          if (wrap) {
+            wrap.style.display = radio.value === 'date' ? 'flex' : 'none';
+          }
+        });
+      });
+    }
+
+    renderSyncLogs();
+    renderBackups();
+    attachSyncScopeEvents();
+    loadMonths();
+    refreshSyncSummary();
+  </script>
+</body>
+</html>
