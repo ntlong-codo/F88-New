@@ -196,6 +196,19 @@ function normalizeSoHd(value) {
   return String(value || '').trim().replace(/\s+/g, '');
 }
 
+function getMapCustomerByRowIndex(rowIndex) {
+  const targetRow = Number(rowIndex);
+  if (!Number.isFinite(targetRow)) return null;
+
+  const rows = Array.isArray(window.mapState.allData) ? window.mapState.allData : [];
+  return rows.find((customer) => Number(customer.rowIndex || customer['rowIndex'] || 0) === targetRow) || null;
+}
+
+function getMapCheckCount(rowIndex) {
+  const customer = getMapCustomerByRowIndex(rowIndex) || {};
+  return Number(customer.So_lan_check ?? customer['So_lan_check'] ?? 0) || 0;
+}
+
 function mergeCustomerGpsFromData(monthRows, dataRows) {
   const dataMap = {};
 
@@ -436,6 +449,56 @@ function computeCustomerGpsTone(customer) {
   return { key: 'gps-ap', label: distanceText || 'GPS ấp', color: '#f59e0b', light: '#fff7e6', text: '#b7791f' };
 }
 
+function normalizeMapCommuneName(value) {
+  const normalized = String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\b(tx|thi xa|thị xã)\b/gi, '')
+    .replace(/\b(phuong|phường|xa|xã|thị trấn|tt|thôn|thon|xom)\b/gi, ' ')
+    .replace(/[^a-zA-Z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+
+  return normalized || 'khong-ten';
+}
+
+function buildMapCommuneLetterMap(data) {
+  const communeMap = {};
+  const order = [];
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+
+  const getCommuneKey = (customer) => {
+    const communeName = getObjectValueByAnyKey(customer, [
+      'WARD_HO_KHAU', 'ward_ho_khau',
+      'WARD_TAM_TRU', 'ward_tam_tru',
+      'Xa', 'xa', 'xaphuong',
+      'WARD_HO_KHAU_AP_NEW', 'ward_ho_khau_ap_new',
+      'WARD_HO_KHAU_AP_OLD', 'ward_ho_khau_ap_old'
+    ]) || '';
+
+    return normalizeMapCommuneName(communeName);
+  };
+
+  (Array.isArray(data) ? data : []).forEach((customer) => {
+    const key = getCommuneKey(customer);
+    if (!(key in communeMap)) {
+      communeMap[key] = order.length;
+      order.push(key);
+    }
+  });
+
+  return {
+    communeMap,
+    alphabet,
+    getLetter: (customer) => {
+      const key = getCommuneKey(customer);
+      const index = communeMap[key] ?? 0;
+      return alphabet[index % alphabet.length] || 'A';
+    }
+  };
+}
+
 function hashString(text) {
   let hash = 0;
   for (let i = 0; i < text.length; i += 1) {
@@ -455,14 +518,14 @@ function getCustomerMarkerColor(customer) {
   return `hsl(${hue} 72% 52%)`;
 }
 
-function getCustomerMarkerIcon(customer, entry, index) {
+function getCustomerMarkerIcon(customer, label) {
   const baseColor = getCustomerMarkerColor(customer);
-  const letter = (entry.label || '').replace(/[^A-Za-z]/g, '').slice(0, 1) || String(index + 1);
+  const letter = String(label || 'A').toUpperCase().slice(0, 1);
   return L.divIcon({
     className: 'gps-marker-num',
-    html: `<span style="background:${baseColor}; color: white; display:inline-flex; width:28px; height:28px; border-radius:50%; align-items:center; justify-content:center; border:2px solid rgba(255,255,255,0.9); box-shadow:0 4px 12px rgba(0,0,0,0.25); font-weight:800; font-size:11px;">${letter}</span>`,
-    iconSize: [28, 28],
-    iconAnchor: [14, 14]
+    html: `<span style="background:${baseColor}; color: white; display:inline-flex; width:22px; height:22px; border-radius:50%; align-items:center; justify-content:center; border:2px solid rgba(255,255,255,0.9); box-shadow:0 4px 12px rgba(0,0,0,0.25); font-weight:700; font-size:10px;">${letter}</span>`,
+    iconSize: [22, 22],
+    iconAnchor: [11, 11]
   });
 }
 
@@ -640,22 +703,17 @@ function renderMapMarkers(data) {
     ? data
     : data.filter((customer) => Number(customer.rowIndex || customer['rowIndex'] || 0) === Number(window.mapState.focusedCustomerRow));
 
+  const communeLetterMap = buildMapCommuneLetterMap(visibleData);
   const pool = [];
   visibleData.forEach((customer, index) => {
     const gpsEntries = getCustomerGpsEntries(customer);
     if (!gpsEntries.length) return;
 
     const primaryEntry = getNearestGpsEntry(customer);
+    const letter = communeLetterMap.getLetter(customer);
     gpsEntries.forEach((entry, entryIndex) => {
-      const baseColor = getCustomerMarkerColor(customer);
-      const letter = (entry.label || '').replace(/[^A-Za-z]/g, '').slice(0, 1) || String(entryIndex + 1);
       const isPrimary = primaryEntry && entry.key === primaryEntry.key && entry.raw === primaryEntry.raw;
-      const markerIcon = L.divIcon({
-        className: 'gps-marker-num',
-        html: `<span style="background:${baseColor}; color: white; display:inline-flex; width:22px; height:22px; border-radius:50%; align-items:center; justify-content:center; border:2px solid rgba(255,255,255,0.9); box-shadow:0 4px 12px rgba(0,0,0,0.25); font-weight:700; font-size:10px;">${letter}</span>`,
-        iconSize: [22, 22],
-        iconAnchor: [11, 11]
-      });
+      const markerIcon = getCustomerMarkerIcon(customer, letter);
 
       const marker = L.marker([entry.coords.lat, entry.coords.lng], {
         icon: markerIcon
@@ -807,6 +865,7 @@ async function doMapCustomerCheckGps(rowIndex, soHd) {
 
   navigator.geolocation.getCurrentPosition(async (position) => {
     const gps = `${position.coords.latitude.toFixed(6)}, ${position.coords.longitude.toFixed(6)}`;
+    const nextCount = getMapCheckCount(rowIndex) + 1;
     try {
       await window.F88_API.post('updateCustomer', {
         rowIndex,
@@ -814,7 +873,8 @@ async function doMapCustomerCheckGps(rowIndex, soHd) {
         data: {
           Check_GPS: 'Đã Check GPS',
           Check_Time: new Date().toLocaleDateString('vi-VN'),
-          GPS_Chinh: gps
+          GPS_Chinh: gps,
+          So_lan_check: nextCount
         }
       });
       await window.F88_API.post('recordCheckMonth', {
@@ -846,12 +906,14 @@ async function doMapCustomerCheckAo(rowIndex, soHd) {
   }
 
   try {
+    const nextCount = getMapCheckCount(rowIndex) + 1;
     await window.F88_API.post('updateCustomer', {
       rowIndex,
       monthTab: currentMonth,
       data: {
         Check_Ao: 'Đã Check Áo',
-        Check_Time: new Date().toLocaleDateString('vi-VN')
+        Check_Time: new Date().toLocaleDateString('vi-VN'),
+        So_lan_check: nextCount
       }
     });
     await window.F88_API.post('recordCheckMonth', {

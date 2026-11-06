@@ -396,10 +396,132 @@ function getCurrentRegularFilterState() {
 
 function applyApFilter(data) {
   const apType = window.appState.apFilterType || 'ap_old';
-  const apKeyField = apType === 'ap_old' ? 'WARD_HO_KHAU_AP_OLD' : 'WARD_HO_KHAU_AP_NEW';
   const groups = {};
 
+  const recordApEntries = (customer) => {
+    const records = [];
+
+    const oldRaw = customer.WARD_HO_KHAU_AP_OLD || customer['WARD_HO_KHAU_AP_OLD'] || '';
+    const newRaw = customer.WARD_HO_KHAU_AP_NEW || customer['WARD_HO_KHAU_AP_NEW'] || '';
+
+    if (oldRaw) {
+      const parsed = parseApAddressString(oldRaw, 'ap_old');
+      records.push({
+        source: 'ap_old',
+        type: 'ap_old',
+        ap: normalizeLocationKey(parsed.ap),
+        xa: normalizeLocationKey(parsed.xa),
+        huyen: normalizeLocationKey(parsed.huyen),
+        tinh: normalizeLocationKey(parsed.tinh),
+        raw: oldRaw
+      });
+    }
+
+    if (newRaw) {
+      const parsed = parseApAddressString(newRaw, 'ap_new');
+      records.push({
+        source: 'ap_new',
+        type: 'ap_new',
+        ap: normalizeLocationKey(parsed.ap),
+        xa: normalizeLocationKey(parsed.xa),
+        huyen: normalizeLocationKey(parsed.huyen),
+        tinh: normalizeLocationKey(parsed.tinh),
+        raw: newRaw
+      });
+    }
+
+    return records;
+  };
+
   data.forEach((customer) => {
+    const entries = recordApEntries(customer);
+    if (!entries.length) return;
+
+    if (apType === 'mixed') {
+      const oldEntries = entries.filter((entry) => entry.source === 'ap_old');
+      const newEntries = entries.filter((entry) => entry.source === 'ap_new');
+
+      if (oldEntries.length) {
+        oldEntries.forEach((oldEntry) => {
+          const matchedNewEntries = newEntries.filter((newEntry) => {
+            const sameXa = oldEntry.xa === newEntry.xa;
+            const sameTinh = oldEntry.tinh === newEntry.tinh || !oldEntry.tinh || !newEntry.tinh;
+            return sameXa && sameTinh;
+          });
+
+          const targetEntries = matchedNewEntries.length ? matchedNewEntries : [oldEntry];
+          targetEntries.forEach((targetEntry) => {
+            const communeKey = `${oldEntry.tinh || targetEntry.tinh || 'chua-co'}||${oldEntry.huyen || 'chua-co'}||${oldEntry.xa || targetEntry.xa || 'chua-co'}`;
+            const apKey = targetEntry.ap || oldEntry.ap || 'Chưa có ấp';
+
+            if (!groups[communeKey]) {
+              groups[communeKey] = {
+                key: oldEntry.xa || targetEntry.xa || 'Chưa có xã',
+                type: 'xa',
+                xaphuong: oldEntry.xa || targetEntry.xa || 'Chưa có xã',
+                quanhuyen: oldEntry.huyen || 'Chưa có huyện',
+                tinhtp: oldEntry.tinh || targetEntry.tinh || 'Chưa có tỉnh',
+                apGroups: {}
+              };
+            }
+
+            if (!groups[communeKey].apGroups[apKey]) {
+              groups[communeKey].apGroups[apKey] = {
+                key: apKey,
+                type: 'mixed',
+                xaphuong: oldEntry.xa || targetEntry.xa || 'Chưa có xã',
+                quanhuyen: oldEntry.huyen || 'Chưa có huyện',
+                tinhtp: oldEntry.tinh || targetEntry.tinh || 'Chưa có tỉnh',
+                customers: []
+              };
+            }
+
+            groups[communeKey].apGroups[apKey].customers.push(customer);
+          });
+        });
+      }
+
+      newEntries.forEach((newEntry) => {
+        const hasMatchingOld = oldEntries.some((oldEntry) => {
+          const sameXa = oldEntry.xa === newEntry.xa;
+          const sameTinh = oldEntry.tinh === newEntry.tinh || !oldEntry.tinh || !newEntry.tinh;
+          return sameXa && sameTinh;
+        });
+
+        if (hasMatchingOld) return;
+
+        const communeKey = `${newEntry.tinh || 'chua-co'}||${newEntry.huyen || 'chua-co'}||${newEntry.xa || 'chua-co'}`;
+        const apKey = newEntry.ap || 'Chưa có ấp';
+
+        if (!groups[communeKey]) {
+          groups[communeKey] = {
+            key: newEntry.xa || 'Chưa có xã',
+            type: 'xa',
+            xaphuong: newEntry.xa || 'Chưa có xã',
+            quanhuyen: newEntry.huyen || 'Chưa có huyện',
+            tinhtp: newEntry.tinh || 'Chưa có tỉnh',
+            apGroups: {}
+          };
+        }
+
+        if (!groups[communeKey].apGroups[apKey]) {
+          groups[communeKey].apGroups[apKey] = {
+            key: apKey,
+            type: 'mixed',
+            xaphuong: newEntry.xa || 'Chưa có xã',
+            quanhuyen: newEntry.huyen || 'Chưa có huyện',
+            tinhtp: newEntry.tinh || 'Chưa có tỉnh',
+            customers: []
+          };
+        }
+
+        groups[communeKey].apGroups[apKey].customers.push(customer);
+      });
+
+      return;
+    }
+
+    const apKeyField = apType === 'ap_old' ? 'WARD_HO_KHAU_AP_OLD' : 'WARD_HO_KHAU_AP_NEW';
     const rawApValue = customer[apKeyField] || customer[apKeyField.toLowerCase()] || '';
     const parsed = parseApAddressString(rawApValue, apType);
 
@@ -1444,14 +1566,25 @@ function escapeHtml(value) {
 }
 
 function setApFilterType(type) {
-  window.appState.apFilterType = type || 'ap_old';
+  window.appState.apFilterType = type === 'ap_new' ? 'ap_new' : type === 'mixed' ? 'mixed' : 'ap_old';
   window.appState.expandedApGroupKey = null;
   const oldBtn = document.getElementById('apFilterTypeOldBtn');
   const newBtn = document.getElementById('apFilterTypeNewBtn');
-  if (oldBtn) oldBtn.classList.toggle('btn-warning', window.appState.apFilterType === 'ap_old');
-  if (newBtn) newBtn.classList.toggle('btn-warning', window.appState.apFilterType === 'ap_new');
-  if (oldBtn) oldBtn.classList.toggle('btn-outline-warning', window.appState.apFilterType !== 'ap_old');
-  if (newBtn) newBtn.classList.toggle('btn-outline-warning', window.appState.apFilterType !== 'ap_new');
+  const mixedBtn = document.getElementById('apFilterTypeMixedBtn');
+
+  if (oldBtn) {
+    oldBtn.classList.toggle('btn-warning', window.appState.apFilterType === 'ap_old');
+    oldBtn.classList.toggle('btn-outline-warning', window.appState.apFilterType !== 'ap_old');
+  }
+  if (newBtn) {
+    newBtn.classList.toggle('btn-warning', window.appState.apFilterType === 'ap_new');
+    newBtn.classList.toggle('btn-outline-warning', window.appState.apFilterType !== 'ap_new');
+  }
+  if (mixedBtn) {
+    mixedBtn.classList.toggle('btn-warning', window.appState.apFilterType === 'mixed');
+    mixedBtn.classList.toggle('btn-outline-warning', window.appState.apFilterType !== 'mixed');
+  }
+
   filterData();
 }
 

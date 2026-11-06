@@ -532,23 +532,74 @@
       }, 120);
     }
 
-    function getApMarkerIcon(item) {
+    function normalizeCommuneName(value) {
+      const normalized = String(value || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/\b(tx|thi xa|thị xã)\b/gi, '')
+        .replace(/\b(phuong|phường|xa|xã|thị trấn|tt|thôn|thon|xom)\b/gi, ' ')
+        .replace(/[^a-zA-Z0-9\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+
+      return normalized || 'khong-ten';
+    }
+
+    function resolveApMarkerLabels(entries) {
+      const labelsByKey = {};
+      const communeLetterMap = {};
+      const communeOrder = [];
+      const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+
+      const getCommuneKey = (item) => {
+        const communeName = item.xaphuong || item.xa || item.quanhuyen || item.huyen || item.tinhtp || item.tinh || 'khong-ten';
+        return normalizeCommuneName(communeName);
+      };
+
+      entries.forEach((item) => {
+        const communeKey = getCommuneKey(item);
+        if (!communeLetterMap[communeKey]) {
+          communeLetterMap[communeKey] = communeOrder.length;
+          communeOrder.push(communeKey);
+        }
+      });
+
+      entries.forEach((item) => {
+        const key = `${item.tabName || 'ap'}|${Number(item.rowIndex || 0)}`;
+        const communeKey = getCommuneKey(item);
+        const letterIndex = communeLetterMap[communeKey] ?? 0;
+        labelsByKey[key] = alphabet[letterIndex % alphabet.length] || 'A';
+      });
+
+      return labelsByKey;
+    }
+
+    function getApMarkerIcon(item, label) {
       const fillColor = getApMarkerColor(item);
+      const markerText = (label || 'A').toUpperCase();
       return L.divIcon({
         className: 'ap-pin-marker',
         html: `
           <div style="
-            width:18px; height:18px; border-radius:50%;
+            width:20px; height:20px; border-radius:50%;
             background:${fillColor};
             border:2px solid rgba(255,255,255,0.95);
             box-shadow:0 8px 18px rgba(0,0,0,0.22);
-            display:block;
+            display:flex;
+            align-items:center;
+            justify-content:center;
             position:relative;
             transform:translateZ(0);
-          "></div>
+            color:#fff;
+            font-size:10px;
+            font-weight:800;
+            line-height:1;
+            user-select:none;
+          ">${escapeHtml(markerText)}</div>
         `,
-        iconSize: [18, 18],
-        iconAnchor: [9, 9],
+        iconSize: [20, 20],
+        iconAnchor: [10, 10],
         popupAnchor: [0, -8]
       });
     }
@@ -620,8 +671,10 @@
       let marker = window.apMarkerRegistry && window.apMarkerRegistry[markerKey];
 
       if (!marker) {
+        const markerKeyLocal = getApMarkerKey({ ...item, tabName });
+        const markerLabel = resolveApMarkerLabels([{ ...item, tabName }])[markerKeyLocal] || 'A';
         marker = L.marker([coords.lat, coords.lng], {
-          icon: getApMarkerIcon({ ...item, tabName })
+          icon: getApMarkerIcon({ ...item, tabName }, markerLabel)
         }).addTo(window.apMapLayer);
 
         marker.markerKey = markerKey;
@@ -684,6 +737,7 @@
         return;
       }
 
+      const markerLabels = resolveApMarkerLabels(displayEntries);
       const validMarkers = [];
       displayEntries.forEach((item) => {
         const gps = normalizeApGpsString(item.gps || '');
@@ -691,11 +745,12 @@
         const coords = parseApGpsCoordinates(gps);
         if (!coords) return;
 
+        const markerKey = getApMarkerKey(item);
+        const markerLabel = markerLabels[markerKey] || 'A';
         const marker = L.marker([coords.lat, coords.lng], {
-          icon: getApMarkerIcon(item)
+          icon: getApMarkerIcon(item, markerLabel)
         }).addTo(layer);
 
-        const markerKey = getApMarkerKey(item);
         marker.markerKey = markerKey;
         window.apMapState.markerRegistry[markerKey] = marker;
 
