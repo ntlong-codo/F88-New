@@ -103,6 +103,21 @@
     .ap-popup-action.edit { background: linear-gradient(135deg, #d97706, #f59e0b); }
     .ap-popup-action .action-text { display: inline; }
 
+    #apMapPanel:fullscreen,
+    #apMapPanel:-webkit-full-screen,
+    #apMapPanel:-moz-full-screen {
+      width: 100vw !important;
+      height: 100vh !important;
+      z-index: 2000;
+    }
+
+    #apMapPanel:fullscreen #apMapCanvas,
+    #apMapPanel:-webkit-full-screen #apMapCanvas,
+    #apMapPanel:-moz-full-screen #apMapCanvas {
+      height: 100vh !important;
+      min-height: 100vh !important;
+    }
+
     @media (max-width: 576px) {
       .ap-popup-shell {
         min-width: 180px;
@@ -175,6 +190,14 @@
           <div class="small text-muted fw-bold">🧭 Bản đồ vị trí ấp</div>
           <span id="apMapStatusBadge" class="badge bg-secondary">Đang tải...</span>
           <span id="apMapPointCount" class="badge bg-info text-dark">0 điểm</span>
+        </div>
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+          <button id="centerApCurrentLocationBtn" type="button" class="btn btn-sm btn-outline-primary" onclick="centerMapOnCurrentLocation()">
+            📍 Vị trí hiện tại
+          </button>
+          <button id="toggleApFullScreenBtn" type="button" class="btn btn-sm btn-outline-dark" onclick="toggleApMapFullScreen()">
+            ⤢ Full
+          </button>
         </div>
       </div>
 
@@ -474,9 +497,42 @@
       }, 120);
     }
 
+    function syncApFullScreenButtonState() {
+      const button = document.getElementById('toggleApFullScreenBtn');
+      if (!button) return;
+
+      const isFullscreen = !!document.fullscreenElement;
+      button.innerHTML = isFullscreen
+        ? '⤢ Thoát full'
+        : '⤢ Full';
+      button.setAttribute('title', isFullscreen ? 'Thoát toàn màn hình' : 'Toàn màn hình');
+    }
+
+    function toggleApMapFullScreen() {
+      const panel = document.getElementById('apMapPanel');
+      if (!panel) return;
+
+      if (!document.fullscreenElement) {
+        if (panel.requestFullscreen) {
+          panel.requestFullscreen().catch(() => {});
+        }
+        return;
+      }
+
+      if (document.exitFullscreen) {
+        document.exitFullscreen();
+      }
+    }
+
     function centerMapOnCurrentLocation() {
-      if (!window.apMap || hasCenteredMapOnCurrentLocation) return;
+      if (!window.apMap) {
+        ensureApMap();
+      }
+      if (!window.apMap) return;
+
       if (!navigator.geolocation) {
+        showToast('Trình duyệt không hỗ trợ định vị vị trí hiện tại.', 'warning');
+        window.apMap.setView([10.03, 105.77], 12);
         hasCenteredMapOnCurrentLocation = true;
         return;
       }
@@ -486,9 +542,24 @@
         const lng = position.coords.longitude;
         window.apMap.setView([lat, lng], 14);
         hasCenteredMapOnCurrentLocation = true;
+
+        if (!window.apMapState.currentUserMarker) {
+          window.apMapState.currentUserMarker = L.circleMarker([lat, lng], {
+            radius: 8,
+            color: '#2563eb',
+            fillColor: '#60a5fa',
+            fillOpacity: 0.85,
+            weight: 2
+          }).addTo(window.apMapState.map);
+        } else {
+          window.apMapState.currentUserMarker.setLatLng([lat, lng]);
+        }
+
+        showToast('Đã định vị vị trí hiện tại trên bản đồ.', 'success');
       }, () => {
         window.apMap.setView([10.03, 105.77], 12);
         hasCenteredMapOnCurrentLocation = true;
+        showToast('Không lấy được vị trí hiện tại. Vui lòng cấp quyền GPS.', 'danger');
       }, { enableHighAccuracy: true, timeout: 10000 });
     }
 
@@ -1144,11 +1215,27 @@
               window.apMap.setView([10.03, 105.77], 12);
             }
           }, 300);
+
+          setTimeout(() => {
+            centerMapOnCurrentLocation();
+          }, 600);
         });
       }, 200);
     }
 
-    window.addEventListener('DOMContentLoaded', initializePage);
+    document.addEventListener('fullscreenchange', () => {
+      syncApFullScreenButtonState();
+      if (window.apMap) {
+        setTimeout(() => {
+          window.apMap.invalidateSize();
+        }, 120);
+      }
+    });
+
+    window.addEventListener('DOMContentLoaded', () => {
+      syncApFullScreenButtonState();
+      initializePage();
+    });
   </script>
 </body>
 </html>

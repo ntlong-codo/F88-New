@@ -4,6 +4,7 @@ window.appState = {
   filteredData: [],
   gpsFilterEnabled: false,
   apFilterEnabled: false,
+  dailyPlanFilterEnabled: false,
   apFilterType: 'ap_old',
   apFilterGroupMode: 'xa',
   expandedApGroupKey: null,
@@ -22,6 +23,10 @@ window.F88_AUTH_TTL = 24 * 60 * 60 * 1000;
 function normalizeMonthKey(value) {
   const text = String(value || '').trim();
   if (!text) return '';
+
+  const lower = text.toLowerCase();
+  if (lower === 'all' || lower.includes('f88_sheet_cache_') || lower.includes('cache')) return '';
+
   const noSpace = text.replace(/tháng/gi, '').replace(/\s+/g, '');
   const matchSlash = noSpace.match(/(\d{1,2})[\/\-.](\d{4})/);
   if (matchSlash) return matchSlash[1].padStart(2, '0') + matchSlash[2];
@@ -211,6 +216,290 @@ function setLoadingStatus(status, detail) {
   if (detailNode) detailNode.textContent = detail;
 }
 
+function setSyncButtonState(state, message = '') {
+  const btn = document.getElementById('manualSyncBtn');
+  const icon = document.getElementById('syncActionIcon');
+  const label = btn ? btn.querySelector('.sync-action-label') : null;
+
+  if (!btn || !icon) return;
+
+  icon.classList.remove('sync-running', 'sync-success', 'sync-error');
+  icon.textContent = '🔄';
+
+  if (state === 'running') {
+    icon.textContent = '⟳';
+    icon.classList.add('sync-running');
+    btn.title = message || 'Đang đồng bộ dữ liệu...';
+    btn.disabled = true;
+    if (label) label.textContent = 'Syncing';
+    return;
+  }
+
+  if (state === 'success') {
+    icon.textContent = '✓';
+    icon.classList.add('sync-success');
+    btn.title = message || 'Đồng bộ thành công.';
+    btn.disabled = false;
+    if (label) label.textContent = 'Sync';
+    return;
+  }
+
+  if (state === 'error') {
+    icon.textContent = '✕';
+    icon.classList.add('sync-error');
+    btn.title = message || 'Đồng bộ thất bại.';
+    btn.disabled = false;
+    if (label) label.textContent = 'Sync';
+    return;
+  }
+
+  icon.textContent = '🔄';
+  btn.title = message || 'Đồng bộ dữ liệu';
+  btn.disabled = false;
+  if (label) label.textContent = 'Sync';
+}
+
+function updateSyncStatusUi(connected, message) {
+  const manualBtn = document.getElementById('manualSyncBtn');
+  if (!manualBtn) return;
+
+  if (connected) {
+    setSyncButtonState('success', message || 'Đồng bộ thành công.');
+  } else {
+    setSyncButtonState('error', message || 'Đồng bộ thất bại.');
+  }
+}
+
+window.updateSyncStatusUi = updateSyncStatusUi;
+
+async function syncSheetAndCacheWithoutUiReload() {
+  const month = normalizeMonthKey(window.appState.selectedMonth || '');
+  const cacheKey = buildSheetCacheKey(month);
+  const fallbackRows = readSheetCache(month) && Array.isArray(readSheetCache(month).data) ? readSheetCache(month).data : [];
+
+  try {
+    const result = await window.F88_API.fetch('getData', { month });
+    const rows = Array.isArray(result.data) ? result.data : [];
+    if (rows.length) {
+      writeSheetCache(cacheKey, rows);
+      window.appState.allData = rows;
+    } else if (fallbackRows.length) {
+      window.appState.allData = fallbackRows;
+    }
+
+    updateSyncStatusUi(true, 'Đồng bộ thành công.');
+    return rows.length ? rows : fallbackRows;
+  } catch (error) {
+    console.error(error);
+    updateSyncStatusUi(false, 'Đồng bộ thất bại, đang dùng cache cũ.');
+    if (fallbackRows.length) {
+      window.appState.allData = fallbackRows;
+    }
+    throw error;
+  }
+}
+
+async function triggerManualSync() {
+  const month = normalizeMonthKey(window.appState.selectedMonth || '');
+  setSyncButtonState('running', 'Đang đồng bộ dữ liệu...');
+  try {
+    await syncSheetAndCacheWithoutUiReload();
+    showToast('Đồng bộ dữ liệu thành công.', 'success');
+  } catch (error) {
+    showToast('Đồng bộ thất bại. Dữ liệu cache vẫn đang hoạt động.', 'warning');
+  }
+}
+
+window.triggerManualSync = triggerManualSync;
+
+const F88_DATA_CACHE_TTL_MS = 5 * 60 * 1000;
+
+function buildSheetCacheKey(monthKey) {
+  return 'f88_sheet_cache_' + (monthKey || 'all');
+}
+
+function readSheetCache(monthKey) {
+  try {
+    const storageKey = buildSheetCacheKey(monthKey);
+    const raw = localStorage.getItem(storageKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.data) || !parsed.updatedAt) return null;
+    return { data: parsed.data, updatedAt: Number(parsed.updatedAt) || 0 };
+  } catch (error) {
+    console.warn('Sheet cache read failed:', error);
+    return null;
+  }
+}
+
+function writeSheetCache(monthKey, rows) {
+  try {
+    const storageKey = buildSheetCacheKey(monthKey);
+    const payload = {
+      updatedAt: Date.now(),
+      data: Array.isArray(rows) ? rows : []
+    };
+    localStorage.setItem(storageKey, JSON.stringify(payload));
+  } catch (error) {
+    console.warn('Sheet cache write failed:', error);
+  }
+}
+
+function readMonthsCache() {
+  try {
+    const raw = localStorage.getItem('f88_months_cache');
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!parsed) return [];
+
+    if (Array.isArray(parsed.months)) return parsed.months;
+    if (Array.isArray(parsed.data)) return parsed.data;
+    return [];
+  } catch (error) {
+    console.warn('Months cache read failed:', error);
+    return [];
+  }
+}
+
+function writeMonthsCache(months) {
+  try {
+    localStorage.setItem('f88_months_cache', JSON.stringify({ updatedAt: Date.now(), months: Array.isArray(months) ? months : [] }));
+  } catch (error) {
+    console.warn('Months cache write failed:', error);
+  }
+}
+
+function deriveMonthsFromLocalSheetCache() {
+  try {
+    const months = [];
+    const seen = new Set();
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key || !key.startsWith('f88_sheet_cache_')) continue;
+      const month = key.replace('f88_sheet_cache_', '').trim();
+      const normalized = normalizeMonthKey(month);
+      if (!normalized || normalized === 'all' || seen.has(normalized)) continue;
+      seen.add(normalized);
+      months.push(normalized);
+    }
+    return months.sort((a, b) => String(b).localeCompare(String(a)));
+  } catch (error) {
+    console.warn('Derived months from local cache failed:', error);
+    return [];
+  }
+}
+
+function buildMonthOptions(months, defaultMonth = '') {
+  const monthSelect = document.getElementById('statMonthSelect');
+  if (!monthSelect) return '';
+
+  const validMonths = Array.from(new Set((months || []).map((month) => normalizeMonthKey(month)).filter(Boolean))).sort((a, b) => String(b).localeCompare(String(a)));
+  monthSelect.innerHTML = '<option value="">-- Tất cả --</option>';
+
+  validMonths.forEach((monthKey) => {
+    const option = document.createElement('option');
+    option.value = monthKey;
+    option.textContent = 'Kỳ ' + formatMonthLabel(monthKey);
+    monthSelect.appendChild(option);
+  });
+
+  const currentMonth = String(new Date().getMonth() + 1).padStart(2, '0');
+  const currentYear = String(new Date().getFullYear());
+  const currentMonthKey = normalizeMonthKey(currentMonth + currentYear);
+  const fallbackMonth = normalizeMonthKey(defaultMonth || validMonths[0] || currentMonthKey || '');
+  const selectedMonth = validMonths.includes(fallbackMonth) ? fallbackMonth : '';
+
+  monthSelect.value = selectedMonth;
+  window.appState.selectedMonth = selectedMonth;
+  window.appState.months = validMonths;
+  return selectedMonth;
+}
+
+async function refreshMonthOptions({ preserveCurrent = true } = {}) {
+  const currentSelection = preserveCurrent ? normalizeMonthKey(window.appState.selectedMonth || document.getElementById('statMonthSelect')?.value || '') : '';
+  let months = readMonthsCache();
+  if (!months.length) {
+    months = deriveMonthsFromLocalSheetCache();
+  }
+
+  const currentMonth = new Date().getMonth() + 1;
+  const currentYear = new Date().getFullYear();
+  const currentMonthKey = normalizeMonthKey(String(currentMonth).padStart(2, '0') + String(currentYear));
+  const fallbackMonths = months.length ? months : (currentMonthKey ? [currentMonthKey] : []);
+
+  const merged = Array.from(new Set([...fallbackMonths].map((month) => normalizeMonthKey(month)).filter(Boolean)))
+    .sort((a, b) => String(b).localeCompare(String(a)));
+
+  const selectedCandidate = preserveCurrent && currentSelection && merged.includes(currentSelection)
+    ? currentSelection
+    : (merged[0] || '');
+
+  buildMonthOptions(merged, selectedCandidate);
+
+  try {
+    const result = await window.F88_API.fetch('getMonths');
+    const remoteMonths = Array.isArray(result && result.months) ? result.months : [];
+    const normalizedRemote = remoteMonths.map((month) => normalizeMonthKey(month)).filter(Boolean);
+    if (normalizedRemote.length) {
+      normalizedRemote.forEach((month) => {
+        if (!merged.includes(month)) merged.push(month);
+      });
+      merged.sort((a, b) => String(b).localeCompare(String(a)));
+      writeMonthsCache(merged);
+      const nextSelected = preserveCurrent && currentSelection && merged.includes(currentSelection)
+        ? currentSelection
+        : (merged[0] || '');
+      buildMonthOptions(merged, nextSelected);
+    }
+  } catch (error) {
+    console.warn('Failed to refresh month list from sheet:', error);
+    if (!merged.length) {
+      const fallback = currentMonthKey ? [currentMonthKey] : [];
+      writeMonthsCache(fallback);
+    }
+  }
+
+  return merged;
+}
+
+function readLatestCachedRowsForSelection() {
+  try {
+    const selectedMonth = normalizeMonthKey(window.appState && window.appState.selectedMonth ? window.appState.selectedMonth : '');
+    const candidates = [];
+
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key || !key.startsWith('f88_sheet_cache_')) continue;
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+
+      try {
+        const parsed = JSON.parse(raw);
+        if (!parsed || !Array.isArray(parsed.data)) continue;
+        const monthKey = key.replace('f88_sheet_cache_', '');
+        const matchesSelection = !selectedMonth || monthKey === selectedMonth || monthKey === 'all';
+        if (matchesSelection) {
+          candidates.push({ monthKey, rows: parsed.data, updatedAt: Number(parsed.updatedAt) || 0 });
+        }
+      } catch (error) {
+        console.warn('Read cached sheet entry failed:', error);
+      }
+    }
+
+    if (!candidates.length) return [];
+    candidates.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    return candidates[0].rows;
+  } catch (error) {
+    console.warn('Latest cached rows read failed:', error);
+    return [];
+  }
+}
+
+function scheduleBackgroundRefresh() {
+  if (window.__f88_backgroundRefreshTimer) return;
+  window.__f88_backgroundRefreshTimer = null;
+}
+
 function parseCoordinate(value) {
   if (!value) return null;
   const str = String(value).trim().replace(/^gps\s*[:=]\s*/i, '').replace(/[()]/g, '').replace(/;/g, ',');
@@ -260,6 +549,34 @@ function getCustomerDistanceKm(customer) {
   return haversineKm(window.appState.currentLocation.lat, window.appState.currentLocation.lng, coord.lat, coord.lng);
 }
 
+function getNearestCustomerCoordForGroup(customers) {
+  const coords = (customers || [])
+    .map((customer) => getCustomerCoord(customer))
+    .filter(Boolean);
+
+  if (!coords.length) return null;
+
+  return coords.reduce((nearest, coord) => {
+    if (!nearest) return coord;
+    return (window.appState.currentLocation)
+      ? (haversineKm(window.appState.currentLocation.lat, window.appState.currentLocation.lng, coord.lat, coord.lng) <
+         haversineKm(window.appState.currentLocation.lat, window.appState.currentLocation.lng, nearest.lat, nearest.lng)
+        ? coord
+        : nearest)
+      : nearest;
+  }, null);
+}
+
+function getNearestDistanceForApGroup(customers) {
+  const coords = (customers || [])
+    .map((customer) => getCustomerCoord(customer))
+    .filter(Boolean);
+
+  if (!coords.length || !window.appState.currentLocation) return null;
+
+  return Math.min(...coords.map((coord) => haversineKm(window.appState.currentLocation.lat, window.appState.currentLocation.lng, coord.lat, coord.lng)));
+}
+
 function locateCurrentPosition() {
   if (window.appState.currentLocation) return Promise.resolve(window.appState.currentLocation);
   if (!navigator.geolocation) {
@@ -290,6 +607,7 @@ function locateCurrentPosition() {
 
 function updateFilterCount() {
   let count = 0;
+  if (window.appState.dailyPlanFilterEnabled) count += 1;
   const monthSelect = document.getElementById('statMonthSelect');
   const filterMonthEl = document.getElementById('filterMonth');
   if (monthSelect && monthSelect.value) count += 1;
@@ -314,35 +632,27 @@ function updateFilterCount() {
 
 async function initApp() {
   try {
-    const monthsResult = await window.F88_API.fetch('getMonths');
-    const months = Array.isArray(monthsResult.months) ? monthsResult.months : [];
-    const validMonths = months.filter((m) => String(m).trim() && String(m).toLowerCase() !== 'ap_new' && String(m).toLowerCase() !== 'ap_old');
+    const initialSelectedMonth = normalizeMonthKey(window.appState.selectedMonth || '');
+    const cachedData = readLatestCachedRowsForSelection();
 
-    window.appState.months = validMonths;
-
-    const monthSelect = document.getElementById('statMonthSelect');
-    if (monthSelect) {
-      monthSelect.innerHTML = '<option value="">-- Tất cả --</option>';
-      validMonths.forEach((month) => {
-        const monthKey = normalizeMonthKey(month);
-        const option = document.createElement('option');
-        option.value = monthKey;
-        option.textContent = 'Kỳ ' + (monthKey ? formatMonthLabel(monthKey) : month);
-        monthSelect.appendChild(option);
-      });
+    if (Array.isArray(cachedData) && cachedData.length) {
+      window.appState.allData = cachedData;
+      filterData();
+      setLoadingStatus('Đã tải dữ liệu cache', 'Hiển thị dữ liệu local trước, đang đồng bộ sheet sau...');
+    } else {
+      setLoadingStatus('Đang kiểm tra dữ liệu mới...', 'Hiển thị dữ liệu local trước, đồng bộ sheet sau...');
     }
 
-    const currentDate = new Date();
-    const currentMonthKey = normalizeMonthKey(String(currentDate.getMonth() + 1).padStart(2, '0') + String(currentDate.getFullYear()));
-    const defaultMonth = validMonths
-      .map((month) => normalizeMonthKey(month))
-      .find((monthKey) => monthKey === currentMonthKey) || normalizeMonthKey(validMonths[0] || '');
+    refreshMonthOptions({ preserveCurrent: true }).catch(() => {});
+    scheduleBackgroundRefresh();
 
-    if (monthSelect) monthSelect.value = defaultMonth;
-    window.appState.selectedMonth = defaultMonth;
+    const startupLoad = loadCustomerData({
+      background: false,
+      cacheFirst: true,
+      monthOverride: initialSelectedMonth || window.appState.selectedMonth || ''
+    }).catch(() => {});
 
-    setLoadingStatus('Đang tải dữ liệu khách hàng...', 'Bước 2/2: tải dữ liệu từ Google Sheets...');
-    await loadCustomerData();
+    await startupLoad;
   } catch (error) {
     console.error(error);
     setLoadingStatus('Lỗi kết nối API', 'Không thể tải dữ liệu từ Google Apps Script.');
@@ -350,22 +660,91 @@ async function initApp() {
   }
 }
 
-async function loadCustomerData() {
+async function loadCustomerData(options = {}) {
+  const { background = false, monthOverride = null, cacheFirst = false } = options;
+  const month = normalizeMonthKey(monthOverride || window.appState.selectedMonth || '');
+  const cacheKey = buildSheetCacheKey(month);
+  const cached = readSheetCache(month);
+  const isFreshCache = cached && Array.isArray(cached.data) && cached.data.length && Date.now() - (cached.updatedAt || 0) < F88_DATA_CACHE_TTL_MS;
+
+  if (isFreshCache && (cacheFirst || !background)) {
+    window.appState.allData = cached.data;
+    filterData();
+    updateSyncStatusUi(true, 'Dữ liệu local đang sẵn sàng.');
+    if (!background) {
+      setLoadingStatus('Đã tải dữ liệu cache', 'Hiển thị dữ liệu local trước, đang kiểm tra bản mới...');
+    }
+
+    if (background) {
+      setTimeout(() => {
+        triggerBackgroundFetchFromSheet({ month, cacheKey, fallbackRows: cached.data }).catch(() => {});
+      }, 250);
+      return;
+    }
+
+    return;
+  }
+
   try {
-    const month = normalizeMonthKey(window.appState.selectedMonth || '');
     const result = await window.F88_API.fetch('getData', { month });
     const rows = Array.isArray(result.data) ? result.data : [];
+    if (rows.length) {
+      writeSheetCache(cacheKey, rows);
+    }
 
     window.appState.allData = rows;
-    filterData();
+
+    if (!background || !hasOpenCustomerCardForBackgroundSync()) {
+      filterData();
+    }
+    updateSyncStatusUi(true, 'Sheet đang kết nối bình thường.');
 
     const loadedCount = rows.length;
-    setLoadingStatus('Đã tải dữ liệu', 'Tổng khách hàng: ' + loadedCount);
-    showToast('Đã tải ' + loadedCount + ' khách hàng.', 'success');
+    if (!background) {
+      setLoadingStatus('Đã tải dữ liệu', 'Tổng khách hàng: ' + loadedCount);
+      showToast('Đã tải ' + loadedCount + ' khách hàng.', 'success');
+    }
+
+    if (background && rows.length && !hasOpenCustomerCardForBackgroundSync()) {
+      showToast('Đã cập nhật dữ liệu nền thành công.', 'secondary');
+    }
   } catch (error) {
     console.error(error);
+    updateSyncStatusUi(false, 'Mất kết nối sheet, đang dùng cache cũ.');
+    const fallbackRows = cached && Array.isArray(cached.data) ? cached.data : [];
+    if (fallbackRows.length) {
+      window.appState.allData = fallbackRows;
+      filterData();
+      setLoadingStatus('Đang dùng dữ liệu cũ', 'Kết nối sheet thất bại, dữ liệu cache vẫn đang hiển thị.');
+      if (!background) showToast('Mất kết nối sheet. Dữ liệu cũ vẫn đang được phục vụ.', 'warning');
+      return;
+    }
+
     setLoadingStatus('Lỗi tải dữ liệu', 'Đã xảy ra lỗi khi đọc dữ liệu từ Google Sheets.');
-    showToast('Lỗi khi tải dữ liệu.', 'danger');
+    if (!background) showToast('Lỗi khi tải dữ liệu.', 'danger');
+  }
+}
+
+async function triggerBackgroundFetchFromSheet({ month, cacheKey, fallbackRows }) {
+  try {
+    const result = await window.F88_API.fetch('getData', { month });
+    const rows = Array.isArray(result.data) ? result.data : [];
+    if (rows.length) {
+      writeSheetCache(cacheKey, rows);
+    }
+
+    window.appState.allData = rows.length ? rows : fallbackRows;
+    if (!hasOpenCustomerCardForBackgroundSync()) {
+      filterData();
+    }
+    updateSyncStatusUi(true, 'Sheet đang kết nối bình thường.');
+  } catch (error) {
+    console.error(error);
+    if (fallbackRows && fallbackRows.length) {
+      window.appState.allData = fallbackRows;
+      filterData();
+    }
+    updateSyncStatusUi(false, 'Mất kết nối sheet, đang dùng cache cũ.');
   }
 }
 
@@ -443,15 +822,20 @@ function applyApFilter(data) {
 
       if (oldEntries.length) {
         oldEntries.forEach((oldEntry) => {
+          const oldBaseKey = `${oldEntry.tinh || 'chua-co'}||${oldEntry.xa || 'chua-co'}`;
           const matchedNewEntries = newEntries.filter((newEntry) => {
-            const sameXa = oldEntry.xa === newEntry.xa;
-            const sameTinh = oldEntry.tinh === newEntry.tinh || !oldEntry.tinh || !newEntry.tinh;
-            return sameXa && sameTinh;
+            const sameApName = normalizeLocationKey(oldEntry.ap) === normalizeLocationKey(newEntry.ap);
+            const sameTinh = !oldEntry.tinh || !newEntry.tinh || oldEntry.tinh === newEntry.tinh;
+            const sameXa = !oldEntry.xa || !newEntry.xa || oldEntry.xa === newEntry.xa;
+            const newBaseKey = `${newEntry.tinh || 'chua-co'}||${newEntry.xa || 'chua-co'}`;
+
+            const sameBaseLocality = oldBaseKey === newBaseKey;
+            return sameApName && sameTinh && sameXa && sameBaseLocality;
           });
 
           const targetEntries = matchedNewEntries.length ? matchedNewEntries : [oldEntry];
           targetEntries.forEach((targetEntry) => {
-            const communeKey = `${oldEntry.tinh || targetEntry.tinh || 'chua-co'}||${oldEntry.huyen || 'chua-co'}||${oldEntry.xa || targetEntry.xa || 'chua-co'}`;
+            const communeKey = `${oldEntry.tinh || targetEntry.tinh || 'chua-co'}||${oldEntry.huyen || targetEntry.huyen || 'chua-co'}||${oldEntry.xa || targetEntry.xa || 'chua-co'}`;
             const apKey = targetEntry.ap || oldEntry.ap || 'Chưa có ấp';
 
             if (!groups[communeKey]) {
@@ -483,9 +867,12 @@ function applyApFilter(data) {
 
       newEntries.forEach((newEntry) => {
         const hasMatchingOld = oldEntries.some((oldEntry) => {
-          const sameXa = oldEntry.xa === newEntry.xa;
-          const sameTinh = oldEntry.tinh === newEntry.tinh || !oldEntry.tinh || !newEntry.tinh;
-          return sameXa && sameTinh;
+          const sameApName = normalizeLocationKey(oldEntry.ap) === normalizeLocationKey(newEntry.ap);
+          const sameTinh = !oldEntry.tinh || !newEntry.tinh || oldEntry.tinh === newEntry.tinh;
+          const sameXa = !oldEntry.xa || !newEntry.xa || oldEntry.xa === newEntry.xa;
+          const oldBaseKey = `${oldEntry.tinh || 'chua-co'}||${oldEntry.xa || 'chua-co'}`;
+          const newBaseKey = `${newEntry.tinh || 'chua-co'}||${newEntry.xa || 'chua-co'}`;
+          return sameApName && sameTinh && sameXa && oldBaseKey === newBaseKey;
         });
 
         if (hasMatchingOld) return;
@@ -565,15 +952,15 @@ function applyApFilter(data) {
           const coords = apEntry.customers
             .map((customer) => getCustomerCoord(customer))
             .filter(Boolean);
-          const nearestKm = window.appState.currentLocation && coords.length
-            ? Math.min(...coords.map((coord) => haversineKm(window.appState.currentLocation.lat, window.appState.currentLocation.lng, coord.lat, coord.lng)))
-            : null;
+          const nearestKm = getNearestDistanceForApGroup(apEntry.customers);
 
           return {
             ...apEntry,
             count: apEntry.customers.length,
             coords,
-            nearestKm
+            nearestKm: nearestKm ?? (window.appState.currentLocation && coords.length
+              ? Math.min(...coords.map((coord) => haversineKm(window.appState.currentLocation.lat, window.appState.currentLocation.lng, coord.lat, coord.lng)))
+              : null)
           };
         })
         .sort((a, b) => (a.nearestKm ?? Number.MAX_SAFE_INTEGER) - (b.nearestKm ?? Number.MAX_SAFE_INTEGER));
@@ -586,6 +973,7 @@ function applyApFilter(data) {
       const nearestKm = window.appState.currentLocation && center
         ? haversineKm(window.appState.currentLocation.lat, window.appState.currentLocation.lng, center.lat, center.lng)
         : null;
+      const fallbackNearestKm = getNearestDistanceForApGroup((Object.values(entry.apGroups) || []).flatMap((apGroup) => apGroup.customers || []));
 
       const totalCustomers = apEntries.reduce((sum, apEntry) => sum + apEntry.count, 0);
       return {
@@ -593,7 +981,7 @@ function applyApFilter(data) {
         count: totalCustomers,
         coords: allCoords,
         center,
-        nearestKm,
+        nearestKm: nearestKm ?? fallbackNearestKm,
         apGroups: apEntries
       };
     })
@@ -723,6 +1111,21 @@ function renderApGroupCards(entries) {
 }
 
 
+function reloadCurrentListUi() {
+  const month = normalizeMonthKey(window.appState.selectedMonth || '');
+  setSyncButtonState('running', 'Đang tải dữ liệu nền...');
+  showToast('Đang tải dữ liệu mới ở nền...', 'primary');
+
+  loadCustomerData({ background: false, cacheFirst: true, monthOverride: month });
+  setTimeout(() => {
+    triggerBackgroundFetchFromSheet({
+      month,
+      cacheKey: buildSheetCacheKey(month),
+      fallbackRows: readSheetCache(month) && Array.isArray(readSheetCache(month).data) ? readSheetCache(month).data : (window.appState.allData || [])
+    }).catch(() => {});
+  }, 150);
+}
+
 function filterData() {
   window.appState.currentPage = 1;
   const filters = getCurrentRegularFilterState();
@@ -744,6 +1147,8 @@ function filterData() {
     const rowMonthValue = normalizeMonthKey(customer.month || customer['month'] || customer['Kỳ'] || customer['Ky'] || '');
     const monthMatch = !selectedMonth || rowMonthValue === selectedMonth || normalizeMonthKey(customer['Kỳ'] || customer['Ky'] || '') === selectedMonth;
     if (!monthMatch) return false;
+
+    if (window.appState.dailyPlanFilterEnabled && !isPlannedTodayPending(customer)) return false;
 
     if (isRegularFilterActive) {
       if (selectedCheck) {
@@ -840,6 +1245,11 @@ function filterData() {
   renderCards(filtered);
   updateStats(filtered);
   updateFilterCount();
+}
+
+function hasOpenCustomerCardForBackgroundSync() {
+  const expandedDetails = document.querySelectorAll('.customer-card .collapse:not(.d-none)');
+  return expandedDetails.length > 0;
 }
 
 function updateStats(data) {
@@ -1008,6 +1418,25 @@ function hasCheckedToday(customer) {
     date.getDate() === today.getDate();
 }
 
+function formatDateForDisplay(dateValue) {
+  const raw = String(dateValue || '').trim();
+  if (!raw) return '';
+  const date = parseSheetDateValue(raw);
+  if (!date) return raw;
+  return date.toLocaleDateString('vi-VN');
+}
+
+function isPlannedToday(customer) {
+  const planValue = formatDateForDisplay(customer.kehoachngay || customer['kehoachngay'] || customer.KehoachNgay || customer['KehoachNgay'] || '');
+  if (!planValue) return false;
+  const today = new Date().toLocaleDateString('vi-VN');
+  return planValue === today;
+}
+
+function isPlannedTodayPending(customer) {
+  return isPlannedToday(customer) && !hasCheckedToday(customer);
+}
+
 function formatOverdueDays(value) {
   const raw = Number(value);
   if (!Number.isFinite(raw) || raw <= 0) return '0D';
@@ -1034,6 +1463,7 @@ function buildCustomerCardHtml(customer, index) {
   const ngayQuaHan = overdueRaw > 0 ? `${overdueRaw} (${formatOverdueDays(overdueRaw)})` : '---';
   const checkCount = Number(customer.So_lan_check ?? customer['So_lan_check'] ?? 0) || 0;
   const checkedToday = hasCheckedToday(customer);
+  const planTodayPending = isPlannedTodayPending(customer);
   const checkGps = String(customer.Check_GPS || customer['Check_GPS'] || '').trim();
   const checkAo = String(customer.Check_Ao || customer['Check_Ao'] || '').trim();
   const currentMonth = window.appState.selectedMonth || document.getElementById('filterMonth')?.value || document.getElementById('gpsFilterMonth')?.value || 'Tất cả';
@@ -1041,6 +1471,7 @@ function buildCustomerCardHtml(customer, index) {
   const summaryAddress = [customer.WARD_HO_KHAU || customer['WARD_HO_KHAU'], customer.WARD_TAM_TRU || customer['WARD_TAM_TRU']].filter(Boolean).join(' • ');
   const shopName = customer.SHOPNAME || customer['SHOPNAME'] || '';
   const categoryBadges = getCustomerCategoryBadges(customer);
+  const planBadgeHtml = planTodayPending ? '<span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle">📅 Kế hoạch hôm nay</span>' : (customer.kehoachngay || customer['kehoachngay'] || customer.KehoachNgay || customer['KehoachNgay'] ? `<span class="badge bg-info-subtle text-info-emphasis border border-info-subtle">📅 ${escapeHtml(formatDateForDisplay(customer.kehoachngay || customer['kehoachngay'] || customer.KehoachNgay || customer['KehoachNgay']))}</span>` : '');
   const noteText = String(customer.Ghi_chu || customer['Ghi_chu'] || '').trim();
   const noteBadgeHtml = noteText ? `<div class="mt-1"><span class="badge bg-success-subtle text-success border border-success-subtle">📝 ${escapeHtml(noteText.length > 38 ? noteText.slice(0, 38) + '...' : noteText)}</span></div>` : '';
   let rowClass = '';
@@ -1068,6 +1499,7 @@ function buildCustomerCardHtml(customer, index) {
             <span class="badge bg-success text-white border border-success">${checkedToday ? '✓ check hôm nay' : ''}</span>
             <span class="badge bg-info-subtle text-info-emphasis border border-info-subtle">📊 ${checkCount} lần</span>
             ${overdueRaw > 0 ? `<span class="badge bg-danger-subtle text-danger border border-danger-subtle">⏰ ${escapeHtml(ngayQuaHan)}</span>` : '<span class="badge bg-light text-secondary border border-secondary-subtle">⏰ ---</span>'}
+            ${planBadgeHtml ? `<span class="d-block mt-1">${planBadgeHtml}</span>` : ''}
           </div>
         </div>
         <div class="card-action-group">
@@ -1193,6 +1625,10 @@ function buildCustomerCardHtml(customer, index) {
               <button class="btn btn-sm text-white flex-fill" style="background-color: #6f42c1;" onclick="doQuickCheckAo(${rowIndex}, '${String(soHd).replace(/'/g, "\\'")}')">🛡️ Check Áo</button>
               <button class="btn btn-sm btn-success flex-fill" onclick="doQuickCheckGps(${rowIndex}, '${String(soHd).replace(/'/g, "\\'")}')">📍 Check GPS</button>
             </div>
+          </div>
+
+          <div class="mb-3">
+            <button class="btn btn-sm btn-outline-info w-100" type="button" onclick="setCustomerPlanToday(${rowIndex})">📅 Kế hoạch ngày</button>
           </div>
 
           <div id="gpsToggle_${rowIndex}" class="mb-2">
@@ -1345,6 +1781,29 @@ async function quickUpdateCustomer(rowIndex, fieldName, value) {
   }
 }
 
+async function setCustomerPlanToday(rowIndex) {
+  const currentMonth = getCurrentMonthTabName();
+  if (!currentMonth || currentMonth === 'data') {
+    showToast('Vui lòng chọn kỳ tháng trước khi gán kế hoạch ngày.', 'danger');
+    return;
+  }
+
+  const currentCustomer = findCustomerByRowIndex(rowIndex) || {};
+  const todayValue = new Date().toLocaleDateString('vi-VN');
+  const todayPlanValue = String(currentCustomer.kehoachngay || currentCustomer['kehoachngay'] || currentCustomer.KehoachNgay || currentCustomer['KehoachNgay'] || '').trim();
+  const isAlreadyToday = todayPlanValue === todayValue;
+  const nextValue = isAlreadyToday ? '' : todayValue;
+
+  const saved = await quickUpdateCustomer(rowIndex, 'kehoachngay', nextValue);
+  if (saved) {
+    closeAllCardSectionsForRow(rowIndex);
+    updateCustomerState(rowIndex, { kehoachngay: nextValue });
+    if (window.appState.dailyPlanFilterEnabled) filterData();
+    showToast(isAlreadyToday ? 'Đã xóa kế hoạch ngày hôm nay.' : 'Đã gán kế hoạch ngày hôm nay.', 'success');
+    refreshSingleCustomerCard(rowIndex);
+  }
+}
+
 async function doQuickCheckAo(rowIndex, soHd) {
   const currentMonth = getCurrentMonthTabName();
   if (!currentMonth || currentMonth === 'data') {
@@ -1459,7 +1918,10 @@ async function saveQuickGps(rowIndex, inputId, fieldName) {
   const saved = await quickUpdateCustomer(rowIndex, fieldName, value);
   if (saved) {
     showToast('Đã lưu GPS thành công');
-    loadCustomerData();
+    refreshSingleCustomerCard(rowIndex);
+    if (window.appState.filteredData && window.appState.filteredData.length) {
+      filterData();
+    }
   }
 }
 
@@ -1470,6 +1932,34 @@ function closeNestedGpsDetailsForRow(rowIndex) {
   if (toggleButton) toggleButton.classList.remove('d-none');
 }
 
+function closeAllInlineEditBoxesForRow(rowIndex) {
+  const rowTypes = ['apnew', 'apold', 'note', 'contact', 'paid'];
+  rowTypes.forEach((type) => {
+    const box = document.getElementById(`box_${type}_${rowIndex}`);
+    if (box) box.classList.add('d-none');
+  });
+}
+
+function closeAllCardSectionsForRow(rowIndex) {
+  const sectionIds = [
+    `checkCard_${rowIndex}`,
+    `paymentCard_${rowIndex}`,
+    `categoryCard_${rowIndex}`,
+    `infoCard_${rowIndex}`,
+    `gpsDetails_${rowIndex}`
+  ];
+
+  sectionIds.forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.classList.add('d-none');
+  });
+
+  const toggleButton = document.getElementById(`gpsToggle_${rowIndex}`);
+  if (toggleButton) toggleButton.classList.remove('d-none');
+
+  closeAllInlineEditBoxesForRow(rowIndex);
+}
+
 function toggleCardSection(activeId, allIds) {
   const ids = Array.isArray(allIds) ? allIds : [allIds];
   const rowMatch = activeId.match(/_(\d+)$/);
@@ -1477,6 +1967,7 @@ function toggleCardSection(activeId, allIds) {
 
   if (rowIndex) {
     closeNestedGpsDetailsForRow(rowIndex);
+    closeAllInlineEditBoxesForRow(rowIndex);
   }
 
   ids.forEach((id) => {
@@ -1503,7 +1994,16 @@ function toggleCardSection(activeId, allIds) {
 
 function toggleEdit(rowIndex, type) {
   const box = document.getElementById(`box_${type}_${rowIndex}`);
-  if (box) box.classList.toggle('d-none');
+  if (!box) return;
+
+  const rowTypes = ['apnew', 'apold', 'note', 'contact', 'paid'];
+  rowTypes.forEach((itemType) => {
+    if (itemType === type) return;
+    const otherBox = document.getElementById(`box_${itemType}_${rowIndex}`);
+    if (otherBox) otherBox.classList.add('d-none');
+  });
+
+  box.classList.toggle('d-none');
 }
 
 async function saveInlineEdit(rowIndex, fieldName, inputId, type) {
@@ -1573,16 +2073,16 @@ function setApFilterType(type) {
   const mixedBtn = document.getElementById('apFilterTypeMixedBtn');
 
   if (oldBtn) {
-    oldBtn.classList.toggle('btn-warning', window.appState.apFilterType === 'ap_old');
-    oldBtn.classList.toggle('btn-outline-warning', window.appState.apFilterType !== 'ap_old');
+    oldBtn.classList.toggle('btn-primary', window.appState.apFilterType === 'ap_old');
+    oldBtn.classList.toggle('btn-outline-primary', window.appState.apFilterType !== 'ap_old');
   }
   if (newBtn) {
-    newBtn.classList.toggle('btn-warning', window.appState.apFilterType === 'ap_new');
-    newBtn.classList.toggle('btn-outline-warning', window.appState.apFilterType !== 'ap_new');
+    newBtn.classList.toggle('btn-primary', window.appState.apFilterType === 'ap_new');
+    newBtn.classList.toggle('btn-outline-primary', window.appState.apFilterType !== 'ap_new');
   }
   if (mixedBtn) {
-    mixedBtn.classList.toggle('btn-warning', window.appState.apFilterType === 'mixed');
-    mixedBtn.classList.toggle('btn-outline-warning', window.appState.apFilterType !== 'mixed');
+    mixedBtn.classList.toggle('btn-primary', window.appState.apFilterType === 'mixed');
+    mixedBtn.classList.toggle('btn-outline-primary', window.appState.apFilterType !== 'mixed');
   }
 
   filterData();
@@ -1640,8 +2140,8 @@ function toggleApFilterMode() {
   if (switchBox) switchBox.classList.toggle('d-none', !nextState);
 
   button.textContent = nextState ? '🏡 Ấp: BẬT' : '🏡 Ấp: TẮT';
-  button.classList.toggle('btn-warning', nextState);
-  button.classList.toggle('btn-outline-warning', !nextState);
+  button.classList.toggle('btn-primary', nextState);
+  button.classList.toggle('btn-outline-primary', !nextState);
 
   if (nextState) {
     window.appState.gpsFilterEnabled = false;
@@ -1659,6 +2159,21 @@ function toggleApFilterMode() {
   showToast(nextState ? 'Đã bật lọc ấp. Lọc thường sẽ tắt.' : 'Đã tắt lọc ấp, quay lại lọc thường.', 'info');
 }
 
+function toggleDailyPlanFilterMode() {
+  const button = document.getElementById('dailyPlanFilterToggleBtn');
+  if (!button) return;
+
+  const nextState = !window.appState.dailyPlanFilterEnabled;
+  window.appState.dailyPlanFilterEnabled = nextState;
+
+  button.textContent = nextState ? '📅 Kế hoạch ngày: BẬT' : '📅 Kế hoạch ngày: TẮT';
+  button.classList.toggle('btn-info', nextState);
+  button.classList.toggle('btn-outline-info', !nextState);
+
+  filterData();
+  showToast(nextState ? 'Đã bật lọc kế hoạch ngày hôm nay.' : 'Đã tắt lọc kế hoạch ngày.', 'info');
+}
+
 function showToast(message, type) {
   const container = document.getElementById('toast-container');
   const toast = document.createElement('div');
@@ -1673,6 +2188,8 @@ function showToast(message, type) {
 
 window.toggleGpsFilterMode = toggleGpsFilterMode;
 window.toggleApFilterMode = toggleApFilterMode;
+window.toggleDailyPlanFilterMode = toggleDailyPlanFilterMode;
+window.setCustomerPlanToday = setCustomerPlanToday;
 window.setApFilterType = setApFilterType;
 window.setApGroupMode = setApGroupMode;
 window.syncMonthAndReload = syncMonthAndReload;
@@ -1694,16 +2211,19 @@ window.resetFilters = function () {
   window.appState.selectedMonth = '';
   window.appState.gpsFilterEnabled = false;
   window.appState.apFilterEnabled = false;
+  window.appState.dailyPlanFilterEnabled = false;
   window.appState.apFilterGroupMode = 'xa';
   window.appState.expandedApGroupKey = null;
   window.appState.expandedApChildKey = null;
   const gpsBox = document.getElementById('gpsFilterControlBox');
   const gpsButton = document.getElementById('gpsFilterToggleBtn');
   const apButton = document.getElementById('apFilterToggleBtn');
+  const dailyButton = document.getElementById('dailyPlanFilterToggleBtn');
   const apSwitch = document.getElementById('apFilterModeSwitch');
   if (gpsBox) gpsBox.classList.add('d-none');
   if (gpsButton) { gpsButton.textContent = '📍 Lọc GPS: TẮT'; gpsButton.classList.remove('btn-danger'); gpsButton.classList.add('btn-outline-danger'); }
-  if (apButton) { apButton.textContent = '🏡 Ấp: TẮT'; apButton.classList.remove('btn-warning'); apButton.classList.add('btn-outline-warning'); }
+  if (apButton) { apButton.textContent = '🏡 Ấp: TẮT'; apButton.classList.remove('btn-primary'); apButton.classList.add('btn-outline-primary'); }
+  if (dailyButton) { dailyButton.textContent = '📅 Kế hoạch ngày: TẮT'; dailyButton.classList.remove('btn-info'); dailyButton.classList.add('btn-outline-info'); }
   if (apSwitch) apSwitch.classList.add('d-none');
   filterData();
   showToast('Đã đặt lại bộ lọc.', 'secondary');

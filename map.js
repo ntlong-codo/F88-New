@@ -8,7 +8,8 @@ window.mapState = {
   myLocation: null,
   markerRegistry: {},
   sidebarVisible: true,
-  focusedCustomerRow: null
+  focusedCustomerRow: null,
+  mapVisibleCount: 20
 };
 
 function toggleMapSidebar(forceVisible) {
@@ -30,6 +31,262 @@ function toggleMapSidebar(forceVisible) {
     }, 220);
   }
 }
+
+const MAP_DATA_CACHE_TTL_MS = 5 * 60 * 1000;
+
+function buildMapCacheKey(monthKey) {
+  return 'f88_map_cache_' + (monthKey || 'all');
+}
+
+function readMonthsCache() {
+  try {
+    const raw = localStorage.getItem('f88_map_months_cache');
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed && parsed.months) ? parsed.months : [];
+  } catch (error) {
+    console.warn('Map months cache read failed:', error);
+    return [];
+  }
+}
+
+function writeMonthsCache(months) {
+  try {
+    localStorage.setItem('f88_map_months_cache', JSON.stringify({ updatedAt: Date.now(), months: Array.isArray(months) ? months : [] }));
+  } catch (error) {
+    console.warn('Map months cache write failed:', error);
+  }
+}
+
+function readMapCache(monthKey) {
+  try {
+    const raw = localStorage.getItem(buildMapCacheKey(monthKey));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.data) || !parsed.updatedAt) return null;
+    return { data: parsed.data, updatedAt: Number(parsed.updatedAt) || 0 };
+  } catch (error) {
+    console.warn('Map cache read failed:', error);
+    return null;
+  }
+}
+
+function writeMapCache(monthKey, rows) {
+  try {
+    localStorage.setItem(buildMapCacheKey(monthKey), JSON.stringify({
+      updatedAt: Date.now(),
+      data: Array.isArray(rows) ? rows : []
+    }));
+  } catch (error) {
+    console.warn('Map cache write failed:', error);
+  }
+}
+
+function readLatestMapCacheForSelection() {
+  try {
+    const selectedMonth = normalizeMonthKey(window.mapState && window.mapState.selectedMonth ? window.mapState.selectedMonth : '');
+    const candidates = [];
+
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key || !key.startsWith('f88_map_cache_')) continue;
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+
+      try {
+        const parsed = JSON.parse(raw);
+        if (!parsed || !Array.isArray(parsed.data)) continue;
+        const monthKey = key.replace('f88_map_cache_', '');
+        const matchesSelection = !selectedMonth || monthKey === selectedMonth || monthKey === 'all';
+        if (matchesSelection) {
+          candidates.push({ monthKey, rows: parsed.data, updatedAt: Number(parsed.updatedAt) || 0 });
+        }
+      } catch (error) {
+        console.warn('Read cached map entry failed:', error);
+      }
+    }
+
+    if (!candidates.length) return [];
+    candidates.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    return candidates[0].rows;
+  } catch (error) {
+    console.warn('Latest cached map rows read failed:', error);
+    return [];
+  }
+}
+
+function scheduleMapBackgroundRefresh() {
+  if (window.__f88_mapBackgroundRefreshTimer) return;
+  window.__f88_mapBackgroundRefreshTimer = setInterval(() => {
+    const selectedMonth = normalizeMonthKey(window.mapState.selectedMonth || '');
+    loadMapDataAndRender({ background: true, monthOverride: selectedMonth }).catch(() => {});
+  }, 180000);
+}
+
+function hydrateMapMonthSelectFromCache() {
+  const monthSelect = document.getElementById('mapMonth');
+  if (!monthSelect) return '';
+
+  const cachedMonths = readMonthsCache();
+  const validMonths = cachedMonths.filter((m) => String(m).trim() && String(m).toLowerCase() !== 'ap_new' && String(m).toLowerCase() !== 'ap_old');
+  if (!validMonths.length) return '';
+
+  monthSelect.innerHTML = '<option value="">-- Tất cả tháng --</option>';
+  validMonths.forEach((month) => {
+    const monthKey = normalizeMonthKey(month);
+    const opt = document.createElement('option');
+    opt.value = monthKey;
+    opt.textContent = 'Kỳ ' + (monthKey ? formatMonthLabel(monthKey) : month);
+    monthSelect.appendChild(opt);
+  });
+
+  const currentDate = new Date();
+  const currentMonthKey = normalizeMonthKey(String(currentDate.getMonth() + 1).padStart(2, '0') + String(currentDate.getFullYear()));
+  const defaultMonth = validMonths
+    .map((month) => normalizeMonthKey(month))
+    .find((monthKey) => monthKey === currentMonthKey) || normalizeMonthKey(validMonths[0] || '');
+
+  monthSelect.value = defaultMonth;
+  return defaultMonth;
+}
+
+function setMapBackgroundSyncState(isRunning) {
+  const icon = document.getElementById('mapSyncMiniDot');
+  const root = document.getElementById('mapBackgroundSyncIcon');
+  if (!icon || !root) return;
+
+  icon.classList.toggle('sync-running', !!isRunning);
+  root.title = isRunning ? 'Đang đồng bộ dữ liệu ngầm...' : 'Dữ liệu đã sẵn sàng';
+  root.classList.toggle('bg-light', !isRunning);
+  root.classList.toggle('text-secondary', !isRunning);
+  root.classList.toggle('bg-warning-subtle', !!isRunning);
+  root.classList.toggle('text-warning-emphasis', !!isRunning);
+  icon.textContent = isRunning ? '⟳' : '✓';
+}
+
+function setMapSyncButtonState(state, message = '') {
+  const btn = document.getElementById('mapManualSyncBtn');
+  const icon = document.getElementById('mapSyncActionIcon');
+  const label = btn ? btn.querySelector('.sync-action-label') : null;
+
+  if (!btn || !icon) return;
+
+  icon.classList.remove('sync-running', 'sync-success', 'sync-error');
+  icon.textContent = '🔄';
+
+  if (state === 'running') {
+    icon.textContent = '⟳';
+    icon.classList.add('sync-running');
+    btn.title = message || 'Đang đồng bộ dữ liệu...';
+    btn.disabled = true;
+    if (label) label.textContent = 'Syncing';
+    return;
+  }
+
+  if (state === 'success') {
+    icon.textContent = '✓';
+    icon.classList.add('sync-success');
+    btn.title = message || 'Đồng bộ thành công.';
+    btn.disabled = false;
+    if (label) label.textContent = 'Sync';
+    return;
+  }
+
+  if (state === 'error') {
+    icon.textContent = '✕';
+    icon.classList.add('sync-error');
+    btn.title = message || 'Đồng bộ thất bại.';
+    btn.disabled = false;
+    if (label) label.textContent = 'Sync';
+    return;
+  }
+
+  icon.textContent = '🔄';
+  btn.title = message || 'Đồng bộ dữ liệu';
+  btn.disabled = false;
+  if (label) label.textContent = 'Sync';
+}
+
+function updateMapSyncStatusUi(connected, message) {
+  const button = document.getElementById('mapManualSyncBtn');
+  if (!button) return;
+
+  if (connected) {
+    setMapSyncButtonState('success', message || 'Đồng bộ thành công.');
+  } else {
+    setMapSyncButtonState('error', message || 'Đồng bộ thất bại.');
+  }
+}
+
+window.updateMapSyncStatusUi = updateMapSyncStatusUi;
+
+async function syncMapSheetAndCacheWithoutUiReload() {
+  const selectedMonth = normalizeMonthKey(window.mapState.selectedMonth || '');
+  const cacheKey = buildMapCacheKey(selectedMonth);
+  const fallbackRows = readMapCache(selectedMonth) && Array.isArray(readMapCache(selectedMonth).data) ? readMapCache(selectedMonth).data : [];
+
+  try {
+    const monthsResult = await window.F88_API.fetch('getMonths');
+    const months = Array.isArray(monthsResult.months) ? monthsResult.months : [];
+    const validMonths = months.filter((m) => String(m).trim() && String(m).toLowerCase() !== 'ap_new' && String(m).toLowerCase() !== 'ap_old');
+    if (validMonths.length) writeMonthsCache(validMonths);
+
+    const result = await window.F88_API.fetch('getData', { month: selectedMonth });
+    const allDataResult = await window.F88_API.fetch('getData', { month: '' });
+    const monthRows = Array.isArray(result.data) ? result.data : [];
+    const dataRows = Array.isArray(allDataResult.data) ? allDataResult.data : [];
+    const mergedRows = mergeCustomerGpsFromData(monthRows, dataRows);
+    if (mergedRows.length) writeMapCache(cacheKey, mergedRows);
+
+    window.mapState.allData = mergedRows;
+    if (!hasOpenMapCustomerFocusForBackgroundSync()) {
+      window.mapState.filteredData = mergedRows;
+    }
+    updateMapSyncStatusUi(true, 'Đồng bộ bản đồ thành công.');
+    return mergedRows;
+  } catch (error) {
+    console.error(error);
+    updateMapSyncStatusUi(false, 'Đồng bộ bản đồ thất bại.');
+    if (fallbackRows.length) {
+      window.mapState.allData = fallbackRows;
+      window.mapState.filteredData = fallbackRows;
+    }
+    throw error;
+  }
+}
+
+async function triggerMapManualSync() {
+  setMapSyncButtonState('running', 'Đang đồng bộ dữ liệu...');
+  try {
+    showToast('Đang đồng bộ dữ liệu bản đồ...', 'primary');
+    await syncMapSheetAndCacheWithoutUiReload();
+    updateMapSyncStatusUi(true, 'Đồng bộ bản đồ thành công.');
+    showToast('Đồng bộ dữ liệu bản đồ thành công.', 'success');
+  } catch (error) {
+    console.error(error);
+    updateMapSyncStatusUi(false, 'Đồng bộ bản đồ thất bại.');
+    showToast('Đồng bộ bản đồ thất bại, vẫn dùng cache cũ.', 'warning');
+  }
+}
+
+window.triggerMapManualSync = triggerMapManualSync;
+
+function reloadMapData() {
+  const month = normalizeMonthKey(window.mapState.selectedMonth || '');
+  setMapSyncButtonState('running', 'Đang tải dữ liệu nền...');
+  showToast('Đang tải dữ liệu mới ở nền...', 'primary');
+
+  loadMapDataAndRender({ background: false, cacheFirst: true, monthOverride: month });
+  setTimeout(() => {
+    refreshMapFromSheet({
+      selectedMonth: month,
+      cacheKey: buildMapCacheKey(month),
+      fallbackRows: readMapCache(month) && Array.isArray(readMapCache(month).data) ? readMapCache(month).data : (window.mapState.allData || [])
+    }).catch(() => {});
+  }, 150);
+}
+
+window.reloadMapData = reloadMapData;
 
 function setCustomerFocus(rowIndex, shouldFocus = true) {
   const targetRow = Number(rowIndex);
@@ -75,7 +332,18 @@ function formatMonthLabel(value) {
 window.addEventListener('DOMContentLoaded', function () {
   initMap();
   toggleMapSidebar(true);
-  loadMapDataAndRender();
+
+  const cachedDefaultMonth = hydrateMapMonthSelectFromCache();
+  const cachedRows = readLatestMapCacheForSelection();
+  if (Array.isArray(cachedRows) && cachedRows.length) {
+    window.mapState.allData = cachedRows;
+    window.mapState.filteredData = cachedRows;
+    window.mapState.selectedMonth = normalizeMonthKey(cachedDefaultMonth || window.mapState.selectedMonth || '');
+    filterAndRenderMap();
+  }
+
+  loadMapDataAndRender({ background: false, cacheFirst: true, monthOverride: cachedDefaultMonth || '' });
+  scheduleMapBackgroundRefresh();
   locateMyPosition();
 });
 
@@ -266,17 +534,64 @@ function parseGpsCoord(rawValue) {
   return null;
 }
 
-async function loadMapDataAndRender() {
+async function loadMapDataAndRender(options = {}) {
+  const { background = false, monthOverride = null, cacheFirst = false } = options;
   const btn = document.getElementById('loadMapBtn');
-  if (btn) {
+  if (btn && !background) {
     btn.innerText = '⏳ Đang tải...';
     btn.disabled = true;
+  }
+
+  const selectedMonth = normalizeMonthKey(monthOverride || (document.getElementById('mapMonth') ? document.getElementById('mapMonth').value : ''));
+  const cacheKey = buildMapCacheKey(selectedMonth);
+  const cached = readMapCache(selectedMonth);
+  const isFreshCache = cached && Array.isArray(cached.data) && cached.data.length && Date.now() - (cached.updatedAt || 0) < MAP_DATA_CACHE_TTL_MS;
+
+  if (isFreshCache && (cacheFirst || !background)) {
+    window.mapState.allData = cached.data;
+    window.mapState.filteredData = cached.data;
+    window.mapState.selectedMonth = selectedMonth;
+    const currentPeriodBadge = document.getElementById('currentMapPeriodBadge');
+    if (currentPeriodBadge) currentPeriodBadge.textContent = 'Kỳ: ' + (selectedMonth ? formatMonthLabel(selectedMonth) : 'Tất cả');
+    filterAndRenderMap();
+    updateMapSyncStatusUi(true, 'Dữ liệu cache đang sẵn sàng.');
+
+    if (btn && !background) {
+      btn.innerText = '✅ Cache';
+      setTimeout(() => {
+        btn.innerText = '🔄 Tải Dữ Liệu';
+        btn.disabled = false;
+      }, 800);
+    }
+
+    if (background) {
+      setMapBackgroundSyncState(true);
+      setTimeout(() => {
+        refreshMapFromSheet({ selectedMonth, cacheKey, fallbackRows: cached.data }).catch(() => {});
+      }, 250);
+      return;
+    }
+
+    return;
+  }
+
+  if (isFreshCache && background) {
+    setMapBackgroundSyncState(true);
+    setTimeout(() => {
+      refreshMapFromSheet({ selectedMonth, cacheKey, fallbackRows: cached.data }).catch(() => {});
+    }, 250);
+    return;
   }
 
   try {
     const monthsResult = await window.F88_API.fetch('getMonths');
     const months = Array.isArray(monthsResult.months) ? monthsResult.months : [];
     const validMonths = months.filter((m) => String(m).trim() && String(m).toLowerCase() !== 'ap_new' && String(m).toLowerCase() !== 'ap_old');
+
+    if (validMonths.length) {
+      writeMonthsCache(validMonths);
+    }
+
     const monthSelect = document.getElementById('mapMonth');
     if (monthSelect) {
       monthSelect.innerHTML = '<option value="">-- Tất cả tháng --</option>';
@@ -293,39 +608,107 @@ async function loadMapDataAndRender() {
       const defaultMonth = validMonths
         .map((month) => normalizeMonthKey(month))
         .find((monthKey) => monthKey === currentMonthKey) || normalizeMonthKey(validMonths[0] || '');
-      monthSelect.value = defaultMonth;
+      monthSelect.value = selectedMonth || defaultMonth;
     }
 
-    const selectedMonth = normalizeMonthKey(monthSelect ? monthSelect.value : '');
-    const result = await window.F88_API.fetch('getData', { month: selectedMonth });
+    const monthToLoad = normalizeMonthKey(monthOverride || (monthSelect ? monthSelect.value : ''));
+    const result = await window.F88_API.fetch('getData', { month: monthToLoad });
     const allDataResult = await window.F88_API.fetch('getData', { month: '' });
 
     const monthRows = Array.isArray(result.data) ? result.data : [];
     const dataRows = Array.isArray(allDataResult.data) ? allDataResult.data : [];
+    const mergedRows = mergeCustomerGpsFromData(monthRows, dataRows);
+    if (mergedRows.length) {
+      writeMapCache(cacheKey, mergedRows);
+    }
 
-    window.mapState.allData = mergeCustomerGpsFromData(monthRows, dataRows);
-    window.mapState.filteredData = window.mapState.allData;
-
-    window.mapState.selectedMonth = selectedMonth;
+    window.mapState.allData = mergedRows;
+    window.mapState.filteredData = mergedRows;
+    window.mapState.selectedMonth = monthToLoad;
+    updateMapSyncStatusUi(true, 'Sheet đang kết nối bình thường.');
     const currentPeriodBadge = document.getElementById('currentMapPeriodBadge');
-    if (currentPeriodBadge) currentPeriodBadge.textContent = 'Kỳ: ' + (selectedMonth ? formatMonthLabel(selectedMonth) : 'Tất cả');
+    if (currentPeriodBadge) currentPeriodBadge.textContent = 'Kỳ: ' + (monthToLoad ? formatMonthLabel(monthToLoad) : 'Tất cả');
     filterAndRenderMap();
 
-    if (btn) {
+    if (btn && !background) {
       btn.innerText = '✅ Xong';
       setTimeout(() => {
         btn.innerText = '🔄 Tải Dữ Liệu';
         btn.disabled = false;
       }, 1000);
     }
-    showToast('Đã tải dữ liệu bản đồ thành công.', 'success');
+
+    if (!background) {
+      showToast('Đã tải dữ liệu bản đồ thành công.', 'success');
+    }
   } catch (error) {
     console.error(error);
+    updateMapSyncStatusUi(false, 'Mất kết nối sheet, đang dùng cache cũ.');
+    const fallbackRows = cached && Array.isArray(cached.data) ? cached.data : [];
+    if (fallbackRows.length) {
+      window.mapState.allData = fallbackRows;
+      window.mapState.filteredData = fallbackRows;
+      filterAndRenderMap();
+      if (btn && !background) {
+        btn.innerText = '⚠️ Dữ liệu cũ';
+        setTimeout(() => {
+          btn.innerText = '🔄 Tải Dữ Liệu';
+          btn.disabled = false;
+        }, 1200);
+      }
+      if (!background) showToast('Kết nối sheet lỗi, đang dùng dữ liệu cache trước đó.', 'warning');
+      return;
+    }
+
     if (btn) {
       btn.innerText = '❌ Lỗi';
       btn.disabled = false;
     }
-    showToast('Không thể tải dữ liệu bản đồ.', 'danger');
+    if (!background) showToast('Không thể tải dữ liệu bản đồ.', 'danger');
+  }
+}
+
+async function refreshMapFromSheet({ selectedMonth, cacheKey, fallbackRows }) {
+  try {
+    const monthsResult = await window.F88_API.fetch('getMonths');
+    const months = Array.isArray(monthsResult.months) ? monthsResult.months : [];
+    const validMonths = months.filter((m) => String(m).trim() && String(m).toLowerCase() !== 'ap_new' && String(m).toLowerCase() !== 'ap_old');
+    if (validMonths.length) writeMonthsCache(validMonths);
+
+    const monthSelect = document.getElementById('mapMonth');
+    if (monthSelect) {
+      monthSelect.innerHTML = '<option value="">-- Tất cả tháng --</option>';
+      validMonths.forEach((month) => {
+        const monthKey = normalizeMonthKey(month);
+        const opt = document.createElement('option');
+        opt.value = monthKey;
+        opt.textContent = 'Kỳ ' + (monthKey ? formatMonthLabel(monthKey) : month);
+        monthSelect.appendChild(opt);
+      });
+    }
+
+    const result = await window.F88_API.fetch('getData', { month: selectedMonth });
+    const allDataResult = await window.F88_API.fetch('getData', { month: '' });
+    const monthRows = Array.isArray(result.data) ? result.data : [];
+    const dataRows = Array.isArray(allDataResult.data) ? allDataResult.data : [];
+    const mergedRows = mergeCustomerGpsFromData(monthRows, dataRows);
+    if (mergedRows.length) writeMapCache(cacheKey, mergedRows);
+    window.mapState.allData = mergedRows;
+    if (!hasOpenMapCustomerFocusForBackgroundSync()) {
+      window.mapState.filteredData = mergedRows;
+      filterAndRenderMap();
+    }
+    updateMapSyncStatusUi(true, 'Sheet đang kết nối bình thường.');
+    setMapBackgroundSyncState(false);
+  } catch (error) {
+    console.warn('Background map refresh failed, keeping cache:', error);
+    updateMapSyncStatusUi(false, 'Mất kết nối sheet, đang dùng cache cũ.');
+    if (fallbackRows && fallbackRows.length) {
+      window.mapState.allData = fallbackRows;
+      window.mapState.filteredData = fallbackRows;
+      filterAndRenderMap();
+    }
+    setMapBackgroundSyncState(false);
   }
 }
 
@@ -519,7 +902,7 @@ function getCustomerMarkerColor(customer) {
 }
 
 function getCustomerMarkerIcon(customer, label) {
-  const baseColor = getCustomerMarkerColor(customer);
+  const baseColor = isPlannedTodayPending(customer) ? '#fd8b13' : getCustomerMarkerColor(customer);
   const letter = String(label || 'A').toUpperCase().slice(0, 1);
   return L.divIcon({
     className: 'gps-marker-num',
@@ -527,6 +910,18 @@ function getCustomerMarkerIcon(customer, label) {
     iconSize: [22, 22],
     iconAnchor: [11, 11]
   });
+}
+
+function isPlannedTodayPending(customer) {
+  const planValue = String(customer.kehoachngay || customer['kehoachngay'] || customer.KehoachNgay || customer['KehoachNgay'] || '').trim();
+  if (!planValue) return false;
+  const planDate = new Date(planValue.includes('/') ? planValue.split('/').reverse().join('-') : planValue);
+  const today = new Date();
+  const sameDay = !Number.isNaN(planDate.getTime()) && planDate.getFullYear() === today.getFullYear() && planDate.getMonth() === today.getMonth() && planDate.getDate() === today.getDate();
+  const checkedToday = String(customer.Check_Time || customer['Check_Time'] || '').trim();
+  const checkedDate = checkedToday ? new Date(checkedToday.includes('/') ? checkedToday.split('/').reverse().join('-') : checkedToday) : null;
+  const alreadyCheckedToday = checkedDate && !Number.isNaN(checkedDate.getTime()) && checkedDate.getFullYear() === today.getFullYear() && checkedDate.getMonth() === today.getMonth() && checkedDate.getDate() === today.getDate();
+  return sameDay && !alreadyCheckedToday;
 }
 
 function getCustomerMarkerKey(customer) {
@@ -618,6 +1013,70 @@ function sortCustomersByDistance(customers) {
   });
 }
 
+function renderMapLoadMoreControl(totalCount) {
+  const listNode = document.getElementById('sidebarCustomerList');
+  if (!listNode) return;
+
+  let controls = document.getElementById('mapLoadMoreControls');
+  if (!controls) {
+    controls = document.createElement('div');
+    controls.id = 'mapLoadMoreControls';
+    controls.className = 'mt-2';
+    listNode.appendChild(controls);
+  }
+
+  const visibleCount = Number(window.mapState.mapVisibleCount || 20);
+  const remaining = Math.max(0, totalCount - visibleCount);
+  if (remaining <= 0) {
+    controls.innerHTML = '';
+    return;
+  }
+
+  controls.innerHTML = `
+    <button type="button" class="btn btn-sm btn-primary w-100" onclick="window.mapState.mapVisibleCount = Math.min((window.mapState.mapVisibleCount || 20) + 20, window.mapState.filteredData.length); filterAndRenderMap();">
+      Xem thêm ${Math.min(20, remaining)} khách
+    </button>
+  `;
+}
+
+function syncMapDailyPlanButtonState() {
+  const checkbox = document.getElementById('mapKehoachFilterToggle');
+  const button = document.getElementById('mapDailyPlanActionBtn');
+  const enabled = !!(checkbox && checkbox.checked);
+
+  if (button) {
+    button.classList.toggle('btn-warning', enabled);
+    button.classList.toggle('btn-outline-warning', !enabled);
+    button.setAttribute('aria-pressed', String(enabled));
+    button.title = enabled ? 'Bỏ lọc kế hoạch ngày hôm nay' : 'Lọc kế hoạch ngày hôm nay';
+    const label = button.querySelector('.map-action-label');
+    if (label) {
+      label.textContent = enabled ? '📅 Kế hoạch ngày: BẬT' : '📅 Kế hoạch ngày';
+    }
+  }
+}
+
+function toggleMapDailyPlanFilter(forceState) {
+  const checkbox = document.getElementById('mapKehoachFilterToggle');
+  if (!checkbox) return;
+
+  const nextState = typeof forceState === 'boolean' ? forceState : !checkbox.checked;
+  checkbox.checked = nextState;
+  syncMapDailyPlanButtonState();
+
+  const checkState = document.getElementById('mapCheckState');
+  if (checkState && !nextState && checkState.value === 'chua_check') {
+    checkState.value = 'chua_check';
+  }
+
+  filterAndRenderMap();
+  showToast(nextState ? 'Đã bật lọc kế hoạch ngày hôm nay.' : 'Đã tắt lọc kế hoạch ngày.', 'info');
+}
+
+function hasOpenMapCustomerFocusForBackgroundSync() {
+  return Number.isFinite(window.mapState?.focusedCustomerRow) && Number(window.mapState.focusedCustomerRow) > 0;
+}
+
 function filterAndRenderMap() {
   if (!window.mapState.map || !window.mapState.markersLayer) return;
 
@@ -625,6 +1084,7 @@ function filterAndRenderMap() {
   const gpsType = document.getElementById('mapGpsType')?.value || 'all';
   const keyword = (document.getElementById('mapSearch')?.value || '').trim().toLowerCase();
   const paymentFilter = document.getElementById('mapThanhToan')?.value || '';
+  const dailyPlanOnly = !!document.getElementById('mapKehoachFilterToggle')?.checked;
 
   const filtered = window.mapState.allData.filter((customer) => {
     const checkValue = String(getObjectValueByAnyKey(customer, ['Check_GPS', 'check_gps']) || '').trim();
@@ -633,6 +1093,8 @@ function filterAndRenderMap() {
     const gpsCoord = parseGpsCoord(gpsCandidate);
 
     if (!gpsCoord) return false;
+
+    if (dailyPlanOnly && !isPlannedTodayPending(customer)) return false;
 
     if (checkState === 'chua_check') {
       if (checkValue !== '' || aoValue !== '') return false;
@@ -678,7 +1140,14 @@ function filterAndRenderMap() {
   });
 
   window.mapState.filteredData = sortCustomersByDistance(filtered);
-  renderMapMarkers(window.mapState.filteredData);
+  const visibleCount = Math.max(20, Number(window.mapState.mapVisibleCount || 20));
+  const visibleData = window.mapState.filteredData.slice(0, Math.min(visibleCount, window.mapState.filteredData.length));
+  window.mapState.mapVisibleCount = visibleData.length;
+
+  renderMapList(visibleData);
+  renderMapLoadMoreControl(window.mapState.filteredData.length);
+
+  renderMapMarkers(window.mapState.filteredData, { fromPage: true });
 }
 
 function toggleMapCustomerDetails(panelId) {
@@ -695,7 +1164,100 @@ function toggleMapCustomerDetails(panelId) {
   }
 }
 
-function renderMapMarkers(data) {
+async function setMapCustomerPlanToday(rowIndex) {
+  const currentMonth = window.mapState?.selectedMonth || document.getElementById('mapMonth')?.value || '';
+  if (!currentMonth) {
+    showToast('Vui lòng chọn kỳ tháng trước khi gán kế hoạch ngày.', 'danger');
+    return;
+  }
+
+  const todayValue = new Date().toLocaleDateString('vi-VN');
+  try {
+    await window.F88_API.post('updateCustomer', {
+      rowIndex: Number(rowIndex),
+      monthTab: currentMonth,
+      data: { kehoachngay: todayValue }
+    });
+
+    const customer = (window.mapState?.allData || []).find((item) => Number(item.rowIndex || item['rowIndex'] || 0) === Number(rowIndex));
+    if (customer) {
+      customer.kehoachngay = todayValue;
+      customer['kehoachngay'] = todayValue;
+      if (window.mapState?.filteredData) {
+        const item = window.mapState.filteredData.find((entry) => Number(entry.rowIndex || entry['rowIndex'] || 0) === Number(rowIndex));
+        if (item) {
+          item.kehoachngay = todayValue;
+          item['kehoachngay'] = todayValue;
+        }
+      }
+    }
+
+    if (typeof window.filterAndRenderMap === 'function') {
+      window.filterAndRenderMap();
+    }
+    showToast('Đã gán kế hoạch ngày hôm nay.', 'success');
+  } catch (error) {
+    console.error(error);
+    showToast('Không thể cập nhật kế hoạch ngày.', 'danger');
+  }
+}
+
+function renderMapList(data) {
+  const listNode = document.getElementById('sidebarCustomerList');
+  if (!listNode) return;
+
+  const pageData = Array.isArray(data) ? data : [];
+  listNode.innerHTML = pageData.length ? pageData.map((customer, index) => {
+    const gpsEntries = getCustomerGpsEntries(customer);
+    const gpsText = gpsEntries.length ? gpsEntries.map((entry) => {
+      const distLabel = entry.distanceKm !== null ? ` • ${entry.distanceKm.toFixed(1)} km` : '';
+      return `<div class="gps-mini-row" role="button" tabindex="0" onclick="event.stopPropagation(); focusCustomerGps(${customer.rowIndex || customer['rowIndex'] || index + 2}, '${entry.key}')" onkeydown="if(event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); focusCustomerGps(${customer.rowIndex || customer['rowIndex'] || index + 2}, '${entry.key}'); }"><span class="gps-mini-label">${escapeHtml(entry.label)}:</span> <span class="gps-mini-value">${escapeHtml(entry.raw)}</span>${distLabel}</div>`;
+    }).join('') : '<div class="text-muted small">Chưa có GPS</div>';
+
+    const name = getObjectValueByAnyKey(customer, ['Ten_khach_hang', 'ten_khach_hang', 'TEN_KHACH_HANG']) || 'Khách hàng';
+    const ap = getObjectValueByAnyKey(customer, ['WARD_HO_KHAU_AP_NEW', 'WARD_HO_KHAU_AP_OLD', 'ward_ho_khau_ap_new', 'ward_ho_khau_ap_old']) || getObjectValueByAnyKey(customer, ['Ap', 'ap']) || '---';
+    const xa = getObjectValueByAnyKey(customer, ['WARD_HO_KHAU', 'WARD_TAM_TRU', 'ward_ho_khau', 'ward_tam_tru', 'Xa', 'xa', 'xaphuong']) || '---';
+    const soHd = getObjectValueByAnyKey(customer, ['so_hd', 'SO_HD', 'sohd']) || '---';
+    const rowIndex = customer.rowIndex || customer['rowIndex'] || index + 2;
+    const kmText = getCustomerDistanceText(customer);
+    const tone = computeCustomerStatusTone(customer);
+    const detailId = `mapCustomerDetail_${rowIndex}_${index}`;
+    const focused = Number(window.mapState.focusedCustomerRow) === Number(rowIndex);
+    const focusButtonLabel = focused ? 'Hiện tất cả' : 'Chỉ khách này';
+    const focusButtonAction = focused ? `setCustomerFocus(${rowIndex}, false)` : `setCustomerFocus(${rowIndex}, true)`;
+    return `
+      <div class="customer-item-card" data-index="${index}" data-status="${tone.key}">
+        <div class="customer-summary-row" onclick="toggleMapCustomerDetails('${detailId}')">
+          <div class="customer-summary-main">
+            <p class="customer-name">${escapeHtml(name)}</p>
+            <div class="customer-phone">${escapeHtml(ap)} • ${escapeHtml(xa)}</div>
+          </div>
+          <div class="customer-summary-side">
+            <div class="distance-pill">📍 ${escapeHtml(kmText)}</div>
+            <div class="map-card-toggle">▾</div>
+          </div>
+        </div>
+
+        <div id="${detailId}" class="customer-detail-panel d-none">
+          <div class="customer-meta">
+            <div class="gps-mini-box">${gpsText}</div>
+          </div>
+
+          <div class="customer-action-row">
+            <button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); ${focusButtonAction}">${focused ? '📌' : '👁️'} ${focusButtonLabel}</button>
+            <button class="btn btn-sm btn-outline-info" onclick="event.stopPropagation(); setMapCustomerPlanToday(${rowIndex})">📅 Kế hoạch ngày</button>
+            <button class="btn btn-sm btn-success" onclick="event.stopPropagation(); doMapCustomerCheckGps(${rowIndex}, '${escapeHtml(soHd)}')">📍 Check GPS</button>
+            <button class="btn btn-sm btn-warning text-white" onclick="event.stopPropagation(); doMapCustomerCheckAo(${rowIndex}, '${escapeHtml(soHd)}')">🛡️ Check Áo</button>
+            ${isPlannedTodayPending(customer) ? '<span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle align-self-center">📅 Kế hoạch hôm nay</span>' : ''}
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('') : '<div class="text-center text-muted py-4">Không có khách hàng nào trên bản đồ.</div>';
+}
+
+function renderMapMarkers(data, options = {}) {
+  const { fromPage = false } = options;
   window.mapState.markersLayer.clearLayers();
   window.mapState.markerRegistry = {};
 
@@ -711,10 +1273,8 @@ function renderMapMarkers(data) {
 
     const primaryEntry = getNearestGpsEntry(customer);
     const letter = communeLetterMap.getLetter(customer);
-    gpsEntries.forEach((entry, entryIndex) => {
-      const isPrimary = primaryEntry && entry.key === primaryEntry.key && entry.raw === primaryEntry.raw;
+    gpsEntries.forEach((entry) => {
       const markerIcon = getCustomerMarkerIcon(customer, letter);
-
       const marker = L.marker([entry.coords.lat, entry.coords.lng], {
         icon: markerIcon
       }).addTo(window.mapState.markersLayer);
@@ -740,6 +1300,7 @@ function renderMapMarkers(data) {
           <div class="mb-1"><strong>Địa chỉ:</strong> ${escapeHtml([getObjectValueByAnyKey(customer, ['WARD_HO_KHAU', 'ward_ho_khau']), getObjectValueByAnyKey(customer, ['WARD_TAM_TRU', 'ward_tam_tru'])].filter(Boolean).join(' • ') || 'Chưa có địa chỉ')}</div>
           ${apLines ? `<div class="mb-2">${apLines}</div>` : ''}
           <div class="mt-2 d-flex flex-wrap gap-2 justify-content-center">
+            <button type="button" class="btn btn-sm btn-outline-info" onclick="window.setMapCustomerPlanToday && window.setMapCustomerPlanToday(${customer.rowIndex || customer['rowIndex'] || index + 2})">📅 Kế hoạch ngày</button>
             <button type="button" class="btn btn-sm btn-success" onclick="window.doMapCustomerCheckGps(${customer.rowIndex || customer['rowIndex'] || index + 2}, '${escapeHtml(getObjectValueByAnyKey(customer, ['so_hd', 'SO_HD', 'So_HD']) || '---')}')">📍 Check GPS</button>
             <button type="button" class="btn btn-sm btn-warning text-white" onclick="window.doMapCustomerCheckAo(${customer.rowIndex || customer['rowIndex'] || index + 2}, '${escapeHtml(getObjectValueByAnyKey(customer, ['so_hd', 'SO_HD', 'So_HD']) || '---')}')">🛡️ Check ảo</button>
             <button type="button" class="btn btn-sm btn-primary" onclick="window.openCustomerDirections(${customer.rowIndex || customer['rowIndex'] || index + 2})">🧭 Chỉ đường</button>
@@ -752,55 +1313,6 @@ function renderMapMarkers(data) {
 
   document.getElementById('statCustomers').textContent = String(visibleData.length);
   document.getElementById('statGpsPoints').textContent = String(pool.length);
-
-  const listNode = document.getElementById('sidebarCustomerList');
-  if (listNode) {
-    listNode.innerHTML = data.length ? data.map((customer, index) => {
-      const gpsEntries = getCustomerGpsEntries(customer);
-      const gpsText = gpsEntries.length ? gpsEntries.map((entry) => {
-        const distLabel = entry.distanceKm !== null ? ` • ${entry.distanceKm.toFixed(1)} km` : '';
-        return `<div class="gps-mini-row" role="button" tabindex="0" onclick="event.stopPropagation(); focusCustomerGps(${customer.rowIndex || customer['rowIndex'] || index + 2}, '${entry.key}')" onkeydown="if(event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); focusCustomerGps(${customer.rowIndex || customer['rowIndex'] || index + 2}, '${entry.key}'); }"><span class="gps-mini-label">${escapeHtml(entry.label)}:</span> <span class="gps-mini-value">${escapeHtml(entry.raw)}</span>${distLabel}</div>`;
-      }).join('') : '<div class="text-muted small">Chưa có GPS</div>';
-
-      const name = getObjectValueByAnyKey(customer, ['Ten_khach_hang', 'ten_khach_hang', 'TEN_KHACH_HANG']) || 'Khách hàng';
-      const ap = getObjectValueByAnyKey(customer, ['WARD_HO_KHAU_AP_NEW', 'WARD_HO_KHAU_AP_OLD', 'ward_ho_khau_ap_new', 'ward_ho_khau_ap_old']) || getObjectValueByAnyKey(customer, ['Ap', 'ap']) || '---';
-      const xa = getObjectValueByAnyKey(customer, ['WARD_HO_KHAU', 'WARD_TAM_TRU', 'ward_ho_khau', 'ward_tam_tru', 'Xa', 'xa', 'xaphuong']) || '---';
-      const soHd = getObjectValueByAnyKey(customer, ['so_hd', 'SO_HD', 'sohd']) || '---';
-      const rowIndex = customer.rowIndex || customer['rowIndex'] || index + 2;
-      const kmText = getCustomerDistanceText(customer);
-      const tone = computeCustomerStatusTone(customer);
-      const detailId = `mapCustomerDetail_${rowIndex}_${index}`;
-      const focused = Number(window.mapState.focusedCustomerRow) === Number(rowIndex);
-      const focusButtonLabel = focused ? 'Hiện tất cả' : 'Chỉ khách này';
-      const focusButtonAction = focused ? `setCustomerFocus(${rowIndex}, false)` : `setCustomerFocus(${rowIndex}, true)`;
-      return `
-        <div class="customer-item-card" data-index="${index}" data-status="${tone.key}">
-          <div class="customer-summary-row" onclick="toggleMapCustomerDetails('${detailId}')">
-            <div class="customer-summary-main">
-              <p class="customer-name">${escapeHtml(name)}</p>
-              <div class="customer-phone">${escapeHtml(ap)} • ${escapeHtml(xa)}</div>
-            </div>
-            <div class="customer-summary-side">
-              <div class="distance-pill">📍 ${escapeHtml(kmText)}</div>
-              <div class="map-card-toggle">▾</div>
-            </div>
-          </div>
-
-          <div id="${detailId}" class="customer-detail-panel d-none">
-            <div class="customer-meta">
-              <div class="gps-mini-box">${gpsText}</div>
-            </div>
-
-            <div class="customer-action-row">
-              <button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); ${focusButtonAction}">${focused ? '📌' : '👁️'} ${focusButtonLabel}</button>
-              <button class="btn btn-sm btn-success" onclick="event.stopPropagation(); doMapCustomerCheckGps(${rowIndex}, '${escapeHtml(soHd)}')">📍 Check GPS</button>
-              <button class="btn btn-sm btn-warning text-white" onclick="event.stopPropagation(); doMapCustomerCheckAo(${rowIndex}, '${escapeHtml(soHd)}')">🛡️ Check Áo</button>
-            </div>
-          </div>
-        </div>
-      `;
-    }).join('') : '<div class="text-center text-muted py-4">Không có khách hàng nào trên bản đồ.</div>';
-  }
 
   if (pool.length) {
     const group = L.featureGroup(pool.map((item) => item.marker));
@@ -936,6 +1448,9 @@ function resetMapFilters() {
   document.getElementById('mapGpsType').value = 'all';
   document.getElementById('mapThanhToan').value = '';
   document.getElementById('mapSearch').value = '';
+  const dailyToggle = document.getElementById('mapKehoachFilterToggle');
+  if (dailyToggle) dailyToggle.checked = false;
+  syncMapDailyPlanButtonState();
   loadMapDataAndRender();
   showToast('Đã đặt lại bộ lọc bản đồ.', 'secondary');
 }
@@ -961,6 +1476,8 @@ function escapeHtml(value) {
 
 window.loadMapDataAndRender = loadMapDataAndRender;
 window.filterAndRenderMap = filterAndRenderMap;
+window.setMapCustomerPlanToday = setMapCustomerPlanToday;
+window.toggleMapDailyPlanFilter = toggleMapDailyPlanFilter;
 window.locateMyPosition = locateMyPosition;
 window.toggleMapSidebar = toggleMapSidebar;
 window.toggleAllCustomerFocus = toggleAllCustomerFocus;

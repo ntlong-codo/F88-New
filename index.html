@@ -50,30 +50,35 @@
       align-items: center;
       gap: 8px;
       width: 100%;
+      flex-wrap: wrap;
     }
 
     .compact-left-actions {
       display: flex;
       align-items: center;
       gap: 6px;
-      flex-shrink: 0;
+      flex: 1 1 100%;
+      flex-wrap: wrap;
+      min-width: 0;
     }
 
     .compact-search-box {
-      flex: 1 1 auto;
+      flex: 1 1 260px;
       min-width: 0;
+      width: 100%;
     }
 
     @media (max-width: 767.98px) {
       .compact-toolbar {
-        flex-wrap: nowrap;
+        flex-wrap: wrap;
       }
       .compact-left-actions {
-        flex-shrink: 0;
+        flex: 1 1 100%;
+        width: 100%;
       }
       .compact-search-box {
-        flex: 1 1 auto;
-        min-width: 0;
+        flex: 1 1 100%;
+        width: 100%;
       }
       .compact-left-actions .btn {
         padding-left: 0.5rem;
@@ -176,6 +181,35 @@
       width: calc(100% - 36px);
     }
 
+    .sync-action-icon {
+      display: inline-flex;
+      width: 18px;
+      height: 18px;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      font-size: 12px;
+      line-height: 1;
+      transition: transform 0.2s ease;
+    }
+
+    .sync-action-icon.sync-running {
+      animation: syncSpin 0.9s linear infinite;
+    }
+
+    .sync-action-icon.sync-success {
+      color: #198754;
+    }
+
+    .sync-action-icon.sync-error {
+      color: #dc3545;
+    }
+
+    @keyframes syncSpin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+
     .btn,
     .form-select,
     .form-control {
@@ -196,7 +230,11 @@
   <div class="container py-3 px-2 d-none" id="mainContent">
     <div class="top-header-row mb-2 bg-white p-2 rounded shadow-sm gap-2">
       <h5 class="mb-0 fw-bold text-primary">📋 F88</h5>
-      <div class="d-flex align-items-center gap-2 header-actions-right">
+      <div class="d-flex align-items-center gap-2 header-actions-right flex-wrap justify-content-end">
+        <button id="manualSyncBtn" class="btn btn-outline-primary btn-sm fw-bold d-flex align-items-center gap-2" type="button" onclick="triggerManualSync()" title="Đồng bộ dữ liệu mới">
+          <span id="syncActionIcon" class="sync-action-icon">🔄</span>
+          <span class="sync-action-label">Sync</span>
+        </button>
         <a href="map.html" class="btn btn-danger btn-sm fw-bold">🗺️ Bản đồ</a>
         <div class="dropdown compact-header-menu">
           <button class="btn btn-primary btn-sm fw-bold dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
@@ -207,7 +245,7 @@
             <li><a class="dropdown-item" href="map.html">🗺️ Bản đồ</a></li>
             <li><a class="dropdown-item" href="ap.html">🏡 Ấp</a></li>
             <li><a class="dropdown-item" href="payment.html">💰 Khách nguồn</a></li>
-            <li><a class="dropdown-item" href="sync.html">🔄 Đồng Bộ</a></li>
+            <li><a class="dropdown-item" href="sync.html">🔄 Đồng bộ</a></li>
             <li><hr class="dropdown-divider" /></li>
             <li><button class="dropdown-item text-danger" type="button" onclick="logout()">🔒 Đăng xuất</button></li>
           </ul>
@@ -234,14 +272,22 @@
           <span class="d-none d-sm-inline">📍 Lọc GPS: TẮT</span>
           <span class="d-inline d-sm-none">📍</span>
         </button>
-        <button id="apFilterToggleBtn" class="btn btn-outline-warning btn-sm fw-bold text-nowrap" onclick="toggleApFilterMode()" aria-label="Lọc Ấp">
+        <button id="apFilterToggleBtn" class="btn btn-outline-primary btn-sm fw-bold text-nowrap" onclick="toggleApFilterMode()" aria-label="Lọc Ấp">
           <span class="d-none d-sm-inline">🏡 Ấp: TẮT</span>
           <span class="d-inline d-sm-none">🏡</span>
+        </button>
+        <button id="dailyPlanFilterToggleBtn" class="btn btn-outline-info btn-sm fw-bold text-nowrap" onclick="toggleDailyPlanFilterMode()" aria-label="Lọc kế hoạch ngày">
+          <span class="d-none d-sm-inline">📅 Kế hoạch ngày: TẮT</span>
+          <span class="d-inline d-sm-none">📅</span>
         </button>
         <button class="btn btn-outline-primary btn-sm" type="button" data-bs-toggle="offcanvas" data-bs-target="#filterDrawer" aria-label="Bộ lọc">
           <span class="d-none d-sm-inline">⚙️ Lọc</span>
           <span class="d-inline d-sm-none">⚙️</span>
           <span class="d-none d-sm-inline"> (<span id="activeFilterCount">0</span>)</span>
+        </button>
+        <button id="reloadListUiBtn" class="btn btn-outline-secondary btn-sm fw-bold text-nowrap" type="button" onclick="reloadCurrentListUi()" aria-label="Reload UI danh sách">
+          <span class="d-none d-sm-inline">⟳ Reload</span>
+          <span class="d-inline d-sm-none">⟳</span>
         </button>
       </div>
       <div class="input-group shadow-sm compact-search-box">
@@ -251,9 +297,9 @@
 
     <div id="apFilterModeSwitch" class="d-none mt-2">
       <div class="btn-group btn-group-sm shadow-sm w-100" role="group" aria-label="Chọn loại ấp">
-        <button type="button" class="btn btn-warning" id="apFilterTypeOldBtn" onclick="setApFilterType('ap_old')">Ấp cũ</button>
-        <button type="button" class="btn btn-outline-warning" id="apFilterTypeNewBtn" onclick="setApFilterType('ap_new')">Ấp mới</button>
-        <button type="button" class="btn btn-outline-warning" id="apFilterTypeMixedBtn" onclick="setApFilterType('mixed')">Lộn Xộn</button>
+        <button type="button" class="btn btn-primary" id="apFilterTypeMixedBtn" onclick="setApFilterType('mixed')">Phân Loại Ấp</button>
+        <button type="button" class="btn btn-outline-primary" id="apFilterTypeOldBtn" onclick="setApFilterType('ap_old')">Ấp cũ</button>
+        <button type="button" class="btn btn-outline-primary" id="apFilterTypeNewBtn" onclick="setApFilterType('ap_new')">Ấp mới</button>
       </div>
     </div>
 

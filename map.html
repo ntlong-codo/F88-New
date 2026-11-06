@@ -72,6 +72,35 @@
       white-space: nowrap;
     }
 
+    .sync-action-icon {
+      display: inline-flex;
+      width: 18px;
+      height: 18px;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      font-size: 12px;
+      line-height: 1;
+      transition: transform 0.2s ease;
+    }
+
+    .sync-action-icon.sync-running {
+      animation: mapSyncSpin 0.9s linear infinite;
+    }
+
+    .sync-action-icon.sync-success {
+      color: #198754;
+    }
+
+    .sync-action-icon.sync-error {
+      color: #dc3545;
+    }
+
+    @keyframes mapSyncSpin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+
     .customer-item-card {
       background: #f8f9fa;
       border: 1px solid #d6dce5;
@@ -289,6 +318,15 @@
       position: relative;
     }
 
+    .map-panel:fullscreen,
+    .map-panel:-webkit-full-screen,
+    .map-panel:-moz-full-screen {
+      width: 100vw !important;
+      height: 100vh !important;
+      border-radius: 0;
+      z-index: 2000;
+    }
+
     #map {
       width: 100%;
       height: 100%;
@@ -358,22 +396,31 @@
         <h5 class="mb-0 fw-bold text-danger">🗺️ Bản Đồ F88</h5>
         <span class="badge bg-primary ms-2 fs-6" id="currentMapPeriodBadge">Kỳ: ---</span>
       </div>
-      <div class="bg-light px-3 py-1 rounded border text-secondary fw-bold small">
-        📊 Tổng khách: <span id="statCustomers" class="text-primary">0</span> |
-        📌 Tổng điểm GPS: <span id="statGpsPoints" class="text-success">0</span>
-      </div>
-      <div class="map-action-group">
+
+      <div class="d-flex align-items-center gap-2 flex-wrap justify-content-end">
+        <button id="mapDailyPlanActionBtn" class="btn btn-outline-warning btn-sm fw-bold" type="button" onclick="toggleMapDailyPlanFilter()" title="Lọc kế hoạch ngày hôm nay">
+          <span class="map-action-label">📅 Kế hoạch ngày</span>
+          <span class="d-inline d-sm-none">📅</span>
+        </button>
         <button class="btn btn-outline-primary btn-sm fw-bold" type="button" onclick="locateMyPosition()" title="Định vị lại">
           <span class="map-action-label">📍 Định vị lại</span>
           <span class="d-inline d-sm-none">📍</span>
         </button>
-        <button class="btn btn-success btn-sm fw-bold" type="button" onclick="loadMapDataAndRender()" title="Tải dữ liệu">
-          <span class="map-action-label">🔄 Tải dữ liệu</span>
-          <span class="d-inline d-sm-none">🔄</span>
+        <button class="btn btn-success btn-sm fw-bold" type="button" onclick="reloadMapData()" title="Reload dữ liệu nền">
+          <span class="map-action-label">⟳ Reload</span>
+          <span class="d-inline d-sm-none">⟳</span>
+        </button>
+        <button id="mapManualSyncBtn" class="btn btn-outline-primary btn-sm fw-bold d-flex align-items-center gap-2" type="button" onclick="triggerMapManualSync()" title="Đồng bộ dữ liệu mới">
+          <span id="mapSyncActionIcon" class="sync-action-icon">🔄</span>
+          <span class="sync-action-label">Sync</span>
         </button>
         <button class="btn btn-outline-secondary btn-sm fw-bold" type="button" data-bs-toggle="offcanvas" data-bs-target="#mapFilterDrawer" title="Bộ lọc">
           <span class="map-action-label">⚙️ Bộ lọc</span>
           <span class="d-inline d-sm-none">⚙️</span>
+        </button>
+        <button class="btn btn-outline-dark btn-sm fw-bold" type="button" onclick="toggleMapFullScreen()" title="Toàn màn hình">
+          <span class="map-action-label">⤢ Full</span>
+          <span class="d-inline d-sm-none">⤢</span>
         </button>
         <div class="dropdown">
           <button class="btn btn-primary btn-sm fw-bold dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
@@ -381,14 +428,20 @@
           </button>
           <ul class="dropdown-menu dropdown-menu-end shadow-sm border-0">
             <li><a class="dropdown-item" href="index.html">📋 Danh sách</a></li>
+            <li><a class="dropdown-item" href="map.html">🗺️ Bản đồ</a></li>
             <li><a class="dropdown-item" href="ap.html">🏡 Ấp</a></li>
             <li><a class="dropdown-item" href="payment.html">💰 Khách nguồn</a></li>
-            <li><a class="dropdown-item" href="sync.html">🔄 Đồng Bộ</a></li>
+            <li><a class="dropdown-item" href="sync.html">🔄 Đồng bộ</a></li>
           </ul>
         </div>
         <button id="toggleMapListBtn" class="btn btn-outline-primary btn-sm fw-bold d-lg-none" onclick="toggleMapSidebar()" title="Ẩn danh sách">
           ☰
         </button>
+      </div>
+
+      <div class="bg-light px-3 py-1 rounded border text-secondary fw-bold small ms-auto">
+        📊 Tổng khách: <span id="statCustomers" class="text-primary">0</span> |
+        📌 Tổng điểm GPS: <span id="statGpsPoints" class="text-success">0</span>
       </div>
     </div>
 
@@ -427,6 +480,7 @@
           <option value="da_check">🟢 Đã check</option>
         </select>
       </div>
+      <input class="d-none" type="checkbox" id="mapKehoachFilterToggle" onchange="toggleMapDailyPlanFilter()" />
       <div class="mb-3">
         <label class="form-label fw-bold small">📍 Loại GPS:</label>
         <select id="mapGpsType" class="form-select fw-bold text-primary" onchange="filterAndRenderMap()">
@@ -459,5 +513,45 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="api.js"></script>
   <script src="map.js"></script>
+  <script>
+    function syncMapFullScreenButtonState() {
+      const button = document.querySelector('#toggleMapListBtn') || document.querySelector('.btn-outline-dark');
+      const fullButton = document.querySelector('.btn-outline-dark[onclick="toggleMapFullScreen()"]');
+      if (!fullButton) return;
+
+      const isFullscreen = !!document.fullscreenElement;
+      fullButton.innerHTML = isFullscreen
+        ? '<span class="map-action-label">⤢ Thoát full</span><span class="d-inline d-sm-none">⤢</span>'
+        : '<span class="map-action-label">⤢ Full</span><span class="d-inline d-sm-none">⤢</span>';
+      fullButton.setAttribute('title', isFullscreen ? 'Thoát toàn màn hình' : 'Toàn màn hình');
+    }
+
+    function toggleMapFullScreen() {
+      const panel = document.querySelector('.map-panel');
+      if (!panel) return;
+
+      if (!document.fullscreenElement) {
+        if (panel.requestFullscreen) {
+          panel.requestFullscreen().catch(() => {});
+        }
+        return;
+      }
+
+      if (document.exitFullscreen) {
+        document.exitFullscreen();
+      }
+    }
+
+    document.addEventListener('fullscreenchange', () => {
+      syncMapFullScreenButtonState();
+      if (window.mapState && window.mapState.map) {
+        setTimeout(() => {
+          window.mapState.map.invalidateSize();
+        }, 120);
+      }
+    });
+
+    window.addEventListener('DOMContentLoaded', syncMapFullScreenButtonState);
+  </script>
 </body>
 </html>

@@ -29,31 +29,59 @@
 
     async fetch(action, params, options) {
       const url = this.buildUrl(action, params || {});
-      const response = await fetch(url, {
-        method: 'GET',
-        ...(options || {})
-      });
+      try {
+        const response = await fetch(url, {
+          method: 'GET',
+          ...(options || {})
+        });
 
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error('API request failed: ' + response.status + ' - ' + text);
+        if (!response.ok) {
+          const text = await response.text();
+          if (typeof window.updateSyncStatusUi === 'function') {
+            window.updateSyncStatusUi(false, 'API GET thất bại: ' + response.status);
+          }
+          throw new Error('API request failed: ' + response.status + ' - ' + text);
+        }
+
+        if (typeof window.updateSyncStatusUi === 'function') {
+          window.updateSyncStatusUi(true, 'Kết nối sheet đang hoạt động.');
+        }
+
+        return response.json();
+      } catch (error) {
+        if (typeof window.updateSyncStatusUi === 'function') {
+          window.updateSyncStatusUi(false, 'Mất kết nối sheet, đang dùng cache cũ.');
+        }
+        throw error;
       }
-
-      return response.json();
     },
 
     async post(action, payload) {
-      const response = await fetch(this.baseUrl, {
-        method: 'POST',
-        body: JSON.stringify({ action, ...payload })
-      });
+      try {
+        const response = await fetch(this.baseUrl, {
+          method: 'POST',
+          body: JSON.stringify({ action, ...payload })
+        });
 
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error('POST failed: ' + response.status + ' - ' + text);
+        if (!response.ok) {
+          const text = await response.text();
+          if (typeof window.updateSyncStatusUi === 'function') {
+            window.updateSyncStatusUi(false, 'API POST thất bại: ' + response.status);
+          }
+          throw new Error('POST failed: ' + response.status + ' - ' + text);
+        }
+
+        if (typeof window.updateSyncStatusUi === 'function') {
+          window.updateSyncStatusUi(true, 'Đã lưu dữ liệu trực tiếp lên sheet.');
+        }
+
+        return response.json();
+      } catch (error) {
+        if (typeof window.updateSyncStatusUi === 'function') {
+          window.updateSyncStatusUi(false, 'Mất kết nối khi lưu vào sheet.');
+        }
+        throw error;
       }
-
-      return response.json();
     }
   };
 })();
