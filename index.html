@@ -280,6 +280,14 @@
           <span class="d-none d-sm-inline">📅 Kế hoạch ngày: TẮT</span>
           <span class="d-inline d-sm-none">📅</span>
         </button>
+        <button id="deadlineSortToggleBtn" class="btn btn-outline-dark btn-sm fw-bold text-nowrap" type="button" onclick="toggleDeadlineSortMode()" aria-label="Sắp xếp theo ngày tới hạn">
+          <span class="deadline-sort-label d-none d-sm-inline">🕒 Hạn chót</span>
+          <span class="d-inline d-sm-none">🕒</span>
+        </button>
+        <button id="priorityFilterToggleBtn" class="btn btn-outline-primary btn-sm fw-bold text-nowrap" type="button" onclick="togglePriorityFilterMode()" aria-label="Lọc ưu tiên khách đã phân loại">
+          <span class="priority-filter-label d-none d-sm-inline">Ưu tiên</span>
+          <span class="d-inline d-sm-none">⭐</span>
+        </button>
         <button class="btn btn-outline-primary btn-sm" type="button" data-bs-toggle="offcanvas" data-bs-target="#filterDrawer" aria-label="Bộ lọc">
           <span class="d-none d-sm-inline">⚙️ Lọc</span>
           <span class="d-inline d-sm-none">⚙️</span>
@@ -407,8 +415,33 @@
         </select>
       </div>
       <div class="mb-3">
+        <label class="form-label fw-bold small">⏳ Ngày quá hạn:</label>
+        <select id="filterDeadline" class="form-select" onchange="filterData(); updateFilterCount();">
+          <option value="">Tất cả</option>
+          <option value="duoi_4_thang">Dưới 4 tháng</option>
+          <option value="duoi_7_thang">Dưới 7 tháng</option>
+          <option value="duoi_1_nam">Dưới 1 năm</option>
+        </select>
+      </div>
+      <div class="mb-3">
         <label class="form-label fw-bold small">🏠 Lọc theo Thường Trú:</label>
         <input type="text" id="filterThuongTru" class="form-control" placeholder="Nhập tên xã, huyện, tỉnh..." oninput="filterData(); updateFilterCount();" />
+      </div>
+      <div class="mb-3">
+        <label class="form-label fw-bold small">📍 Shop theo tỉnh:</label>
+        <select id="filterProvinceType" class="form-select" onchange="filterData(); updateFilterCount();">
+          <option value="all" selected>Tất cả</option>
+          <option value="trong_tinh">Shop trong tỉnh</option>
+          <option value="ngoai_tinh">Shop ngoại tỉnh</option>
+        </select>
+      </div>
+      <div class="mb-3">
+        <label class="form-label fw-bold small">🏠 Tạm trú:</label>
+        <select id="filterTamTru" class="form-select" onchange="filterData(); updateFilterCount();">
+          <option value="all" selected>Tất cả</option>
+          <option value="co_tam_tru">Có tạm trú</option>
+          <option value="khong_tam_tru">Không tạm trú</option>
+        </select>
       </div>
       <button class="btn btn-outline-danger w-100 mt-2" onclick="resetFilters()">🔄 Đặt lại bộ lọc</button>
     </div>

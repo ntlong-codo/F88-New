@@ -115,6 +115,102 @@ function readLatestMapCacheForSelection() {
   }
 }
 
+function normalizeProvinceNameForCode(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return '';
+
+  const normalized = raw
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/[^a-zA-Z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+
+  if (!normalized) return '';
+
+  return normalized
+    .replace(/^(tinh|thanh pho|tp|thanh-pho|city|province)\s+/i, '')
+    .replace(/^(xa|xã|phuong|phường|huyen|huyện|quan|quận|ap|ấp|thon|thôn)\s+/gi, '')
+    .trim();
+}
+
+function buildProvinceCodeFromAddress(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return '';
+
+  const segments = raw
+    .split(/[;,]/)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+
+  const lastSegment = segments.length ? segments[segments.length - 1] : raw;
+  const cleaned = normalizeProvinceNameForCode(lastSegment);
+  if (!cleaned) return '';
+
+  const words = cleaned.split(/\s+/).filter(Boolean);
+  if (!words.length) return '';
+
+  const firstLetters = words.slice(0, 2).map((word) => word[0] || '').join('').toUpperCase();
+  const lastLetter = words[words.length - 1].slice(-1).toUpperCase();
+  const code = `${firstLetters}${lastLetter}`;
+  return code || '';
+}
+
+function getCustomerProvinceCode(customer) {
+  const sourceCandidates = [
+    customer.WARD_HO_KHAU_AP_OLD || customer['WARD_HO_KHAU_AP_OLD'],
+    customer.WARD_HO_KHAU_AP_NEW || customer['WARD_HO_KHAU_AP_NEW'],
+    customer.WARD_HO_KHAU || customer['WARD_HO_KHAU'],
+    customer.WARD_TAM_TRU || customer['WARD_TAM_TRU'],
+    customer.TINHTP || customer['TINHTP'] || customer.tinhtp || customer['tinhtp'],
+    customer.tinh_ho_khau || customer['tinh_ho_khau']
+  ];
+
+  for (const candidate of sourceCandidates) {
+    const code = buildProvinceCodeFromAddress(candidate);
+    if (code) return code;
+  }
+
+  return '';
+}
+
+function getShopProvinceCode(shopName) {
+  const text = String(shopName ?? '').trim();
+  if (!text) return '';
+
+  const match = text.match(/[A-Za-z]{3}/);
+  return match ? match[0].toUpperCase() : '';
+}
+
+function getCustomerTamTruStatus(customer) {
+  const hoKhau = String(customer.WARD_HO_KHAU || customer['WARD_HO_KHAU'] || '').trim();
+  const tamTru = String(customer.WARD_TAM_TRU || customer['WARD_TAM_TRU'] || '').trim();
+
+  if (!tamTru || !hoKhau) return null;
+  if (tamTru.toLowerCase() === hoKhau.toLowerCase()) return null;
+
+  return {
+    label: 'Tạm Trú',
+    kind: 'tam_tru'
+  };
+}
+
+function getCustomerProvinceLocationStatus(customer) {
+  const provinceCode = getCustomerProvinceCode(customer);
+  const shopCode = getShopProvinceCode(customer.SHOPNAME || customer['SHOPNAME']);
+
+  if (!provinceCode || !shopCode) return null;
+  const isInProvince = provinceCode === shopCode;
+  return {
+    provinceCode,
+    shopCode,
+    label: isInProvince ? 'Shop trong tỉnh' : 'Shop ngoại tỉnh',
+    isInProvince
+  };
+}
+
 function scheduleMapBackgroundRefresh() {
   if (window.__f88_mapBackgroundRefreshTimer) return;
   window.__f88_mapBackgroundRefreshTimer = setInterval(() => {
@@ -238,16 +334,15 @@ async function syncMapSheetAndCacheWithoutUiReload() {
     const mergedRows = mergeCustomerGpsFromData(monthRows, dataRows);
     if (mergedRows.length) writeMapCache(cacheKey, mergedRows);
 
-    window.mapState.allData = mergedRows;
-    if (!hasOpenMapCustomerFocusForBackgroundSync()) {
-      window.mapState.filteredData = mergedRows;
-    }
+    // Sync chỉ cập nhật cache local, không render lại map đang hiển thị.
+    // UI sẽ reload lại chỉ khi người dùng nhấn Reload / load local.
     updateMapSyncStatusUi(true, 'Đồng bộ bản đồ thành công.');
     return mergedRows;
   } catch (error) {
     console.error(error);
     updateMapSyncStatusUi(false, 'Đồng bộ bản đồ thất bại.');
     if (fallbackRows.length) {
+      // Giữ nguyên dữ liệu đang hiển thị nếu sync thất bại.
       window.mapState.allData = fallbackRows;
       window.mapState.filteredData = fallbackRows;
     }
@@ -943,6 +1038,10 @@ function buildCustomerPopupHtml(customer) {
   const note = getObjectValueByAnyKey(customer, ['Ghi_chu', 'ghi_chu']) || '';
   const noteHtml = note ? `<div class="mb-2"><strong>Ghi chú:</strong> ${escapeHtml(note)}</div>` : '';
   const distance = getCustomerDistanceText(customer);
+  const provinceStatus = getCustomerProvinceLocationStatus(customer);
+  const tamTruStatus = getCustomerTamTruStatus(customer);
+  const provinceBadgeHtml = provinceStatus ? `<div class="mb-1"><strong>Vùng:</strong> <span class="badge ${provinceStatus.isInProvince ? 'bg-success-subtle text-success-emphasis' : 'bg-warning-subtle text-warning-emphasis'}">${provinceStatus.label}</span> <span class="text-muted small">(${provinceStatus.provinceCode} / ${provinceStatus.shopCode})</span></div>` : '';
+  const tamTruBadgeHtml = tamTruStatus ? `<div class="mb-1"><strong>Tạm Trú:</strong> <span class="badge" style="background-color:#f3e8ff;color:#6d28d9;border:1px solid #d8b4fe;">${tamTruStatus.label}</span></div>` : '';
   const apLines = [
     apNew ? `<div class="mb-1"><strong>Ấp New:</strong> ${escapeHtml(apNew)}</div>` : '',
     apOld ? `<div class="mb-1"><strong>Ấp Old:</strong> ${escapeHtml(apOld)}</div>` : ''
@@ -957,6 +1056,8 @@ function buildCustomerPopupHtml(customer) {
       ${noteHtml}
       <div class="mb-1"><strong>HĐ:</strong> ${escapeHtml(soHd)}</div>
       <div class="mb-1"><strong>Địa chỉ:</strong> ${escapeHtml(diaChi)}</div>
+      ${provinceBadgeHtml || ''}
+      ${tamTruBadgeHtml || ''}
       ${apLines ? `<div class="mb-2">${apLines}</div>` : ''}
       <div class="d-flex flex-wrap gap-2 justify-content-center">
         <button type="button" class="btn btn-sm btn-success" onclick="window.doMapCustomerCheckGps(${rowIndex}, '${escapeHtml(soHd)}')">📍 Check GPS</button>
@@ -999,6 +1100,50 @@ function openCustomerDirections(rowIndex) {
   const lng = coords.lng;
   const url = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
   window.open(url, '_blank');
+}
+
+function parseMapDeadlineDays(value) {
+  if (value === null || value === undefined || value === '') return null;
+
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && numeric >= 0) return numeric;
+
+  const text = String(value).trim().toLowerCase().replace(/,/g, '.');
+  if (!text) return null;
+
+  const monthMatch = text.match(/(\d+(?:\.\d+)?)\s*(tháng|thang|month|months)/i);
+  if (monthMatch) return Number(monthMatch[1]) * 30;
+
+  const yearMatch = text.match(/(\d+(?:\.\d+)?)\s*(năm|nam|year|years)/i);
+  if (yearMatch) return Number(yearMatch[1]) * 365;
+
+  const directNumber = Number(text.replace(/[^\d.\-]/g, ''));
+  return Number.isFinite(directNumber) ? directNumber : null;
+}
+
+function matchesMapDeadlineFilter(customer, filterValue) {
+  if (!filterValue || filterValue === 'all') return true;
+
+  const values = [
+    customer.Ngay_qua_han,
+    customer['Ngay_qua_han'],
+    customer.Ngay_het_han,
+    customer['Ngay_het_han'],
+    customer.ngay_qua_han,
+    customer['ngay_qua_han'],
+    customer.deadline_days,
+    customer['deadline_days'],
+    customer.han,
+    customer['han']
+  ];
+
+  const daysValue = values.map((entry) => parseMapDeadlineDays(entry)).find((entry) => entry !== null && Number.isFinite(entry));
+  if (daysValue === undefined || daysValue === null) return false;
+
+  if (filterValue === 'duoi_4_thang') return daysValue <= 120;
+  if (filterValue === 'duoi_7_thang') return daysValue <= 210;
+  if (filterValue === 'duoi_1_nam') return daysValue <= 365;
+  return true;
 }
 
 function sortCustomersByDistance(customers) {
@@ -1084,6 +1229,7 @@ function filterAndRenderMap() {
   const gpsType = document.getElementById('mapGpsType')?.value || 'all';
   const keyword = (document.getElementById('mapSearch')?.value || '').trim().toLowerCase();
   const paymentFilter = document.getElementById('mapThanhToan')?.value || '';
+  const deadlineFilter = document.getElementById('mapDeadlineFilter')?.value || '';
   const dailyPlanOnly = !!document.getElementById('mapKehoachFilterToggle')?.checked;
 
   const filtered = window.mapState.allData.filter((customer) => {
@@ -1121,6 +1267,8 @@ function filterAndRenderMap() {
       const amount = Number(customer.So_tien_thanh_toan || customer['So_tien_thanh_toan'] || 0);
       if (amount < 500000) return false;
     }
+
+    if (deadlineFilter && !matchesMapDeadlineFilter(customer, deadlineFilter)) return false;
 
     if (keyword) {
       const haystack = [
@@ -1283,6 +1431,8 @@ function renderMapMarkers(data, options = {}) {
       window.mapState.markerRegistry[markerKey] = marker;
       const note = getObjectValueByAnyKey(customer, ['Ghi_chu', 'ghi_chu']) || '';
       const noteHtml = note ? `<div class="mb-1"><strong>Ghi chú:</strong> ${escapeHtml(note)}</div>` : '';
+      const provinceStatus = getCustomerProvinceLocationStatus(customer);
+      const provinceBadgeHtml = provinceStatus ? `<div class="mb-1"><strong>Vùng:</strong> <span class="badge ${provinceStatus.isInProvince ? 'bg-success-subtle text-success-emphasis' : 'bg-warning-subtle text-warning-emphasis'}">${provinceStatus.label}</span> <span class="text-muted small">(${provinceStatus.provinceCode} / ${provinceStatus.shopCode})</span></div>` : '';
       const apNew = getObjectValueByAnyKey(customer, ['WARD_HO_KHAU_AP_NEW', 'ward_ho_khau_ap_new']) || '';
       const apOld = getObjectValueByAnyKey(customer, ['WARD_HO_KHAU_AP_OLD', 'ward_ho_khau_ap_old']) || '';
       const apLines = [
@@ -1298,6 +1448,7 @@ function renderMapMarkers(data, options = {}) {
           </div>
           ${noteHtml}
           <div class="mb-1"><strong>Địa chỉ:</strong> ${escapeHtml([getObjectValueByAnyKey(customer, ['WARD_HO_KHAU', 'ward_ho_khau']), getObjectValueByAnyKey(customer, ['WARD_TAM_TRU', 'ward_tam_tru'])].filter(Boolean).join(' • ') || 'Chưa có địa chỉ')}</div>
+          ${provinceBadgeHtml || ''}
           ${apLines ? `<div class="mb-2">${apLines}</div>` : ''}
           <div class="mt-2 d-flex flex-wrap gap-2 justify-content-center">
             <button type="button" class="btn btn-sm btn-outline-info" onclick="window.setMapCustomerPlanToday && window.setMapCustomerPlanToday(${customer.rowIndex || customer['rowIndex'] || index + 2})">📅 Kế hoạch ngày</button>
@@ -1447,6 +1598,7 @@ function resetMapFilters() {
   document.getElementById('mapCheckState').value = 'chua_check';
   document.getElementById('mapGpsType').value = 'all';
   document.getElementById('mapThanhToan').value = '';
+  document.getElementById('mapDeadlineFilter').value = '';
   document.getElementById('mapSearch').value = '';
   const dailyToggle = document.getElementById('mapKehoachFilterToggle');
   if (dailyToggle) dailyToggle.checked = false;

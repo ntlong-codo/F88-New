@@ -5,6 +5,9 @@ window.appState = {
   gpsFilterEnabled: false,
   apFilterEnabled: false,
   dailyPlanFilterEnabled: false,
+  deadlineSortEnabled: false,
+  priorityFilterEnabled: false,
+  deadlineFilter: '',
   apFilterType: 'ap_old',
   apFilterGroupMode: 'xa',
   expandedApGroupKey: null,
@@ -84,6 +87,102 @@ function normalizeLocationKey(...parts) {
 
   if (!values.length) return 'chua-co';
   return values.join(' || ');
+}
+
+function normalizeProvinceNameForCode(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return '';
+
+  const normalized = raw
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/[^a-zA-Z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+
+  if (!normalized) return '';
+
+  return normalized
+    .replace(/^(tinh|thanh pho|tp|thanh-pho|city|province)\s+/i, '')
+    .replace(/^(xa|xã|phuong|phường|huyen|huyện|quan|quận|ap|ấp|thon|thôn)\s+/gi, '')
+    .trim();
+}
+
+function buildProvinceCodeFromAddress(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return '';
+
+  const segments = raw
+    .split(/[;,]/)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+
+  const lastSegment = segments.length ? segments[segments.length - 1] : raw;
+  const cleaned = normalizeProvinceNameForCode(lastSegment);
+  if (!cleaned) return '';
+
+  const words = cleaned.split(/\s+/).filter(Boolean);
+  if (!words.length) return '';
+
+  const firstLetters = words.slice(0, 2).map((word) => word[0] || '').join('').toUpperCase();
+  const lastLetter = words[words.length - 1].slice(-1).toUpperCase();
+  const code = `${firstLetters}${lastLetter}`;
+  return code || '';
+}
+
+function getCustomerProvinceCode(customer) {
+  const sourceCandidates = [
+    customer.WARD_HO_KHAU_AP_OLD || customer['WARD_HO_KHAU_AP_OLD'],
+    customer.WARD_HO_KHAU_AP_NEW || customer['WARD_HO_KHAU_AP_NEW'],
+    customer.WARD_HO_KHAU || customer['WARD_HO_KHAU'],
+    customer.WARD_TAM_TRU || customer['WARD_TAM_TRU'],
+    customer.TINHTP || customer['TINHTP'] || customer.tinhtp || customer['tinhtp'],
+    customer.tinh_ho_khau || customer['tinh_ho_khau']
+  ];
+
+  for (const candidate of sourceCandidates) {
+    const code = buildProvinceCodeFromAddress(candidate);
+    if (code) return code;
+  }
+
+  return '';
+}
+
+function getShopProvinceCode(shopName) {
+  const text = String(shopName ?? '').trim();
+  if (!text) return '';
+
+  const match = text.match(/[A-Za-z]{3}/);
+  return match ? match[0].toUpperCase() : '';
+}
+
+function getCustomerTamTruStatus(customer) {
+  const hoKhau = String(customer.WARD_HO_KHAU || customer['WARD_HO_KHAU'] || '').trim();
+  const tamTru = String(customer.WARD_TAM_TRU || customer['WARD_TAM_TRU'] || '').trim();
+
+  if (!tamTru || !hoKhau) return null;
+  if (tamTru.toLowerCase() === hoKhau.toLowerCase()) return null;
+
+  return {
+    label: 'Tạm Trú',
+    kind: 'tam_tru'
+  };
+}
+
+function getCustomerProvinceLocationStatus(customer) {
+  const provinceCode = getCustomerProvinceCode(customer);
+  const shopCode = getShopProvinceCode(customer.SHOPNAME || customer['SHOPNAME']);
+
+  if (!provinceCode || !shopCode) return null;
+  const isInProvince = provinceCode === shopCode;
+  return {
+    provinceCode,
+    shopCode,
+    label: isInProvince ? 'Shop trong tỉnh' : 'Shop ngoại tỉnh',
+    isInProvince
+  };
 }
 
 function parseApAddressString(value, type) {
@@ -624,8 +723,15 @@ function updateFilterCount() {
   if (filterTimNhaEl && filterTimNhaEl.value) count += 1;
   const filterDoKhoEl = document.getElementById('filterDoKho');
   if (filterDoKhoEl && filterDoKhoEl.value) count += 1;
+  const filterDeadlineEl = document.getElementById('filterDeadline');
+  if (filterDeadlineEl && filterDeadlineEl.value) count += 1;
+  if (window.appState.priorityFilterEnabled) count += 1;
   const filterThuongTruEl = document.getElementById('filterThuongTru');
   if (filterThuongTruEl && filterThuongTruEl.value.trim()) count += 1;
+  const filterProvinceTypeEl = document.getElementById('filterProvinceType');
+  if (filterProvinceTypeEl && filterProvinceTypeEl.value && filterProvinceTypeEl.value !== 'all') count += 1;
+  const filterTamTruEl = document.getElementById('filterTamTru');
+  if (filterTamTruEl && filterTamTruEl.value && filterTamTruEl.value !== 'all') count += 1;
   const activeFilterCountEl = document.getElementById('activeFilterCount');
   if (activeFilterCountEl) activeFilterCountEl.textContent = String(count);
 }
@@ -766,8 +872,11 @@ function getCurrentRegularFilterState() {
     selectedTrangThaiHd: document.getElementById('filterTrangThaiHd')?.value || '',
     selectedTimNha: document.getElementById('filterTimNha')?.value || '',
     selectedDoKho: document.getElementById('filterDoKho')?.value || '',
+    deadlineFilter: document.getElementById('filterDeadline')?.value || '',
     keyword: (document.getElementById('searchKeyword') || {}).value || '',
     thuongTru: (document.getElementById('filterThuongTru') || {}).value || '',
+    provinceType: document.getElementById('filterProvinceType')?.value || 'all',
+    tamTruType: document.getElementById('filterTamTru')?.value || 'all',
     gpsFilterType: document.getElementById('gpsFilterType')?.value || 'all',
     gpsFilterCheckState: document.getElementById('gpsFilterCheckState')?.value || ''
   };
@@ -776,6 +885,7 @@ function getCurrentRegularFilterState() {
 function applyApFilter(data) {
   const apType = window.appState.apFilterType || 'ap_old';
   const groups = {};
+  const selectedDeadline = document.getElementById('filterDeadline')?.value || '';
 
   const recordApEntries = (customer) => {
     const records = [];
@@ -813,6 +923,8 @@ function applyApFilter(data) {
   };
 
   data.forEach((customer) => {
+    if (selectedDeadline && !matchesDeadlineFilter(customer, selectedDeadline)) return;
+
     const entries = recordApEntries(customer);
     if (!entries.length) return;
 
@@ -949,14 +1061,19 @@ function applyApFilter(data) {
     .map((entry) => {
       const apEntries = Object.values(entry.apGroups)
         .map((apEntry) => {
-          const coords = apEntry.customers
+          const sortedCustomers = window.appState.deadlineSortEnabled && !window.appState.gpsFilterEnabled && !window.appState.apFilterEnabled
+            ? sortCustomersByDeadline(apEntry.customers || [])
+            : (apEntry.customers || []);
+
+          const coords = sortedCustomers
             .map((customer) => getCustomerCoord(customer))
             .filter(Boolean);
-          const nearestKm = getNearestDistanceForApGroup(apEntry.customers);
+          const nearestKm = getNearestDistanceForApGroup(sortedCustomers);
 
           return {
             ...apEntry,
-            count: apEntry.customers.length,
+            customers: sortedCustomers,
+            count: sortedCustomers.length,
             coords,
             nearestKm: nearestKm ?? (window.appState.currentLocation && coords.length
               ? Math.min(...coords.map((coord) => haversineKm(window.appState.currentLocation.lat, window.appState.currentLocation.lng, coord.lat, coord.lng)))
@@ -1009,7 +1126,10 @@ function renderApGroupCards(entries) {
     const childEntry = activeChildKey ? expandedEntry.apGroups.find((apEntry) => apEntry.key === activeChildKey) : null;
 
     if (childEntry) {
-      const customers = (childEntry.customers || []).map((customer, index) => buildCustomerCardHtml(customer, index)).join('');
+      const customersList = window.appState.deadlineSortEnabled && !window.appState.gpsFilterEnabled && !window.appState.apFilterEnabled
+        ? sortCustomersByDeadline(childEntry.customers || [])
+        : (childEntry.customers || []);
+      const customers = customersList.map((customer, index) => buildCustomerCardHtml(customer, index)).join('');
       container.innerHTML = `
         <div class="mb-2 d-flex gap-2">
           <button class="btn btn-sm btn-outline-secondary" type="button" id="backToApGroupBtn">← Quay lại danh sách ấp</button>
@@ -1136,8 +1256,11 @@ function filterData() {
   const selectedTrangThaiHd = filters.selectedTrangThaiHd || '';
   const selectedTimNha = filters.selectedTimNha || '';
   const selectedDoKho = filters.selectedDoKho || '';
+  const selectedDeadline = filters.deadlineFilter || '';
   const keyword = filters.keyword.trim().toLowerCase();
   const thuongTru = filters.thuongTru.trim().toLowerCase();
+  const provinceType = filters.provinceType || 'all';
+  const tamTruType = filters.tamTruType || 'all';
   const gpsFilterType = filters.gpsFilterType || 'all';
   const gpsFilterCheckState = filters.gpsFilterCheckState || '';
   const isRegularFilterActive = !window.appState.gpsFilterEnabled && !window.appState.apFilterEnabled;
@@ -1151,6 +1274,8 @@ function filterData() {
     if (window.appState.dailyPlanFilterEnabled && !isPlannedTodayPending(customer)) return false;
 
     if (isRegularFilterActive) {
+      if (window.appState.priorityFilterEnabled && !hasPriorityClassification(customer)) return false;
+
       if (selectedCheck) {
         const checkValue = String(customer.Check_GPS || customer['Check_GPS'] || '').trim();
         const checkAoValue = String(customer.Check_Ao || customer['Check_Ao'] || '').trim();
@@ -1178,10 +1303,24 @@ function filterData() {
       if (selectedTrangThaiHd && String(customer.Trang_thai_hd || customer['Trang_thai_hd'] || '').trim() !== selectedTrangThaiHd) return false;
       if (selectedTimNha && String(customer.Trang_thai_tim_nha || customer['Trang_thai_tim_nha'] || '').trim() !== selectedTimNha) return false;
       if (selectedDoKho && String(customer.Muc_do_kho || customer['Muc_do_kho'] || '').trim() !== selectedDoKho) return false;
+      if (selectedDeadline && !matchesDeadlineFilter(customer, selectedDeadline)) return false;
 
       if (thuongTru) {
         const haystack = [customer.WARD_HO_KHAU, customer.WARD_TAM_TRU, customer['WARD_HO_KHAU'], customer['WARD_TAM_TRU']].join(' ').toLowerCase();
         if (haystack.indexOf(thuongTru) === -1) return false;
+      }
+
+      if (provinceType && provinceType !== 'all') {
+        const status = getCustomerProvinceLocationStatus(customer);
+        if (!status) return false;
+        if (provinceType === 'trong_tinh' && !status.isInProvince) return false;
+        if (provinceType === 'ngoai_tinh' && status.isInProvince) return false;
+      }
+
+      if (tamTruType && tamTruType !== 'all') {
+        const tamTruStatus = getCustomerTamTruStatus(customer);
+        if (tamTruType === 'co_tam_tru' && !tamTruStatus) return false;
+        if (tamTruType === 'khong_tam_tru' && !!tamTruStatus) return false;
       }
     }
 
@@ -1230,6 +1369,11 @@ function filterData() {
     return;
   }
 
+  if (window.appState.priorityFilterEnabled) {
+    filtered = filtered.filter((customer) => hasPriorityClassification(customer));
+    filtered = [...filtered].sort((a, b) => getCustomerPriorityScore(b) - getCustomerPriorityScore(a));
+  }
+
   if ((window.appState.gpsFilterEnabled || window.appState.apFilterEnabled) && window.appState.currentLocation) {
     filtered = [...filtered].sort((a, b) => {
       const distA = getCustomerDistanceKm(a);
@@ -1239,6 +1383,8 @@ function filterData() {
       if (distB == null) return -1;
       return distA - distB;
     });
+  } else if (window.appState.deadlineSortEnabled && isRegularFilterActive) {
+    filtered = sortCustomersByDeadline(filtered);
   }
 
   window.appState.filteredData = filtered;
@@ -1453,6 +1599,170 @@ function formatOverdueDays(value) {
   return parts.join('');
 }
 
+function parseDueDateDays(value) {
+  if (value === null || value === undefined || value === '') return null;
+
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && numeric >= 0) return numeric;
+
+  const text = String(value).trim().toLowerCase().replace(/,/g, '.');
+  if (!text) return null;
+
+  const monthMatch = text.match(/(\d+(?:\.\d+)?)\s*(tháng|thang|month|months)/i);
+  if (monthMatch) {
+    return Number(monthMatch[1]) * 30;
+  }
+
+  const yearMatch = text.match(/(\d+(?:\.\d+)?)\s*(năm|nam|year|years)/i);
+  if (yearMatch) {
+    return Number(yearMatch[1]) * 365;
+  }
+
+  const directNumber = Number(text.replace(/[^\d.\-]/g, ''));
+  return Number.isFinite(directNumber) ? directNumber : null;
+}
+
+function getCustomerDeadlineDays(customer) {
+  const candidates = [
+    customer.Ngay_qua_han,
+    customer['Ngay_qua_han'],
+    customer.Ngay_het_han,
+    customer['Ngay_het_han'],
+    customer.ngay_qua_han,
+    customer['ngay_qua_han'],
+    customer.deadline_days,
+    customer['deadline_days'],
+    customer.han,
+    customer['han']
+  ];
+
+  for (const candidate of candidates) {
+    const value = parseDueDateDays(candidate);
+    if (value !== null) return value;
+  }
+
+  return null;
+}
+
+function matchesDeadlineFilter(customer, filterValue) {
+  const deadlineDays = getCustomerDeadlineDays(customer);
+  if (filterValue === '' || filterValue === 'all') return true;
+  if (deadlineDays === null) return false;
+
+  const monthThreshold = 30;
+  if (filterValue === 'duoi_4_thang') return deadlineDays <= 4 * monthThreshold;
+  if (filterValue === 'duoi_7_thang') return deadlineDays <= 7 * monthThreshold;
+  if (filterValue === 'duoi_1_nam') return deadlineDays <= 365;
+
+  return true;
+}
+
+function sortCustomersByDeadline(customers) {
+  if (!Array.isArray(customers)) return customers;
+
+  return [...customers].sort((a, b) => {
+    const aDays = getCustomerDeadlineDays(a);
+    const bDays = getCustomerDeadlineDays(b);
+    const aValue = aDays === null ? Number.MAX_SAFE_INTEGER : aDays;
+    const bValue = bDays === null ? Number.MAX_SAFE_INTEGER : bDays;
+    return aValue - bValue;
+  });
+}
+
+function getPriorityCategoryValue(rawValue, mapping, fallback = 0) {
+  if (!rawValue) return fallback;
+  const value = String(rawValue).trim();
+  return mapping[value] ?? fallback;
+}
+
+function getCustomerPriorityScore(customer) {
+  const timNha = String(customer.Trang_thai_tim_nha || customer['Trang_thai_tim_nha'] || '').trim();
+  const hd = String(customer.Trang_thai_hd || customer['Trang_thai_hd'] || '').trim();
+  const doKho = String(customer.Muc_do_kho || customer['Muc_do_kho'] || '').trim();
+
+  const timNhaScore = getPriorityCategoryValue(timNha, {
+    'Chưa tìm': 0,
+    'Bỏ địa phương': 1,
+    'Đã tới Ấp': 2,
+    'Có người biết': 3,
+    'Gặp người thân': 4,
+    'Gặp khách hàng': 5
+  }, 0);
+
+  const hdScore = getPriorityCategoryValue(hd, {
+    'Ăn Giựt': 0,
+    'Mất khả năng TT': 1,
+    'Đang kẹt tiền': 2,
+    'Có khả năng': 3,
+    'Hẹn Thanh Toán': 4,
+    'Nhiều khả năng(Hẹn)': 5
+  }, 0);
+
+  const doKhoScore = getPriorityCategoryValue(doKho, {
+    'Bạo lực': 0,
+    'Không hợp tác': 1,
+    'Khó Tính': 2,
+    'Trung lập': 3,
+    'Dễ làm việc': 4
+  }, 0);
+
+  return timNhaScore * 3 + hdScore * 3 + doKhoScore * 2;
+}
+
+function hasPriorityClassification(customer) {
+  const timNha = String(customer.Trang_thai_tim_nha || customer['Trang_thai_tim_nha'] || '').trim();
+  const hd = String(customer.Trang_thai_hd || customer['Trang_thai_hd'] || '').trim();
+  const doKho = String(customer.Muc_do_kho || customer['Muc_do_kho'] || '').trim();
+
+  return [timNha, hd, doKho].some((value) => value && value !== 'Chưa tìm' && value !== 'Chưa biết');
+}
+
+function setDeadlineSortButtonState(enabled) {
+  const button = document.getElementById('deadlineSortToggleBtn');
+  if (!button) return;
+
+  button.classList.toggle('btn-dark', !!enabled);
+  button.classList.toggle('btn-outline-dark', !enabled);
+  button.setAttribute('aria-pressed', String(!!enabled));
+  button.title = enabled ? 'Bỏ sắp xếp theo ngày tới hạn' : 'Sắp xếp theo ngày tới hạn (thấp trước)';
+  const label = button.querySelector('.deadline-sort-label');
+  if (label) label.textContent = enabled ? '🕒 Hạn chót: BẬT' : '🕒 Hạn chót';
+}
+
+function toggleDeadlineSortMode() {
+  const enabled = !window.appState.deadlineSortEnabled;
+  window.appState.deadlineSortEnabled = enabled;
+  setDeadlineSortButtonState(enabled);
+  if (!window.appState.gpsFilterEnabled && !window.appState.apFilterEnabled) {
+    filterData();
+  }
+  showToast(enabled ? 'Đã bật sắp xếp ngày tới hạn thấp trước.' : 'Đã tắt sắp xếp ngày tới hạn.', 'info');
+}
+
+window.toggleDeadlineSortMode = toggleDeadlineSortMode;
+
+function setPriorityFilterButtonState(enabled) {
+  const button = document.getElementById('priorityFilterToggleBtn');
+  if (!button) return;
+
+  button.classList.toggle('btn-primary', !!enabled);
+  button.classList.toggle('btn-outline-primary', !enabled);
+  button.setAttribute('aria-pressed', String(!!enabled));
+  button.title = enabled ? 'Bỏ lọc ưu tiên khách đã phân loại' : 'Lọc ưu tiên khách đã phân loại';
+  const label = button.querySelector('.priority-filter-label');
+  if (label) label.textContent = enabled ? 'Ưu tiên: BẬT' : 'Ưu tiên';
+}
+
+function togglePriorityFilterMode() {
+  const enabled = !window.appState.priorityFilterEnabled;
+  window.appState.priorityFilterEnabled = enabled;
+  setPriorityFilterButtonState(enabled);
+  filterData();
+  showToast(enabled ? 'Đã bật lọc ưu tiên khách đã phân loại.' : 'Đã tắt lọc ưu tiên.', 'info');
+}
+
+window.togglePriorityFilterMode = togglePriorityFilterMode;
+
 function buildCustomerCardHtml(customer, index) {
   const name = customer.Ten_khach_hang || customer['Ten_khach_hang'] || 'Khách hàng';
   const soHd = customer.so_hd || customer['so_hd'] || '---';
@@ -1470,6 +1780,10 @@ function buildCustomerCardHtml(customer, index) {
   const nearestApFilterValue = window.appState.apFilterEnabled ? (document.getElementById('gpsFilterAp')?.value || 'all') : 'all';
   const summaryAddress = [customer.WARD_HO_KHAU || customer['WARD_HO_KHAU'], customer.WARD_TAM_TRU || customer['WARD_TAM_TRU']].filter(Boolean).join(' • ');
   const shopName = customer.SHOPNAME || customer['SHOPNAME'] || '';
+  const provinceStatus = getCustomerProvinceLocationStatus(customer);
+  const provinceBadgeHtml = provinceStatus ? `<span class="badge ${provinceStatus.isInProvince ? 'bg-success-subtle text-success-emphasis border border-success-subtle' : 'bg-warning-subtle text-warning-emphasis border border-warning-subtle'}">${provinceStatus.label}</span>` : '';
+  const tamTruStatus = getCustomerTamTruStatus(customer);
+  const tamTruBadgeHtml = tamTruStatus ? `<span class="badge" style="background-color:#f3e8ff;color:#6d28d9;border:1px solid #d8b4fe;">${tamTruStatus.label}</span>` : '';
   const categoryBadges = getCustomerCategoryBadges(customer);
   const planBadgeHtml = planTodayPending ? '<span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle">📅 Kế hoạch hôm nay</span>' : (customer.kehoachngay || customer['kehoachngay'] || customer.KehoachNgay || customer['KehoachNgay'] ? `<span class="badge bg-info-subtle text-info-emphasis border border-info-subtle">📅 ${escapeHtml(formatDateForDisplay(customer.kehoachngay || customer['kehoachngay'] || customer.KehoachNgay || customer['KehoachNgay']))}</span>` : '');
   const noteText = String(customer.Ghi_chu || customer['Ghi_chu'] || '').trim();
@@ -1499,6 +1813,8 @@ function buildCustomerCardHtml(customer, index) {
             <span class="badge bg-success text-white border border-success">${checkedToday ? '✓ check hôm nay' : ''}</span>
             <span class="badge bg-info-subtle text-info-emphasis border border-info-subtle">📊 ${checkCount} lần</span>
             ${overdueRaw > 0 ? `<span class="badge bg-danger-subtle text-danger border border-danger-subtle">⏰ ${escapeHtml(ngayQuaHan)}</span>` : '<span class="badge bg-light text-secondary border border-secondary-subtle">⏰ ---</span>'}
+            ${provinceBadgeHtml || ''}
+            ${tamTruBadgeHtml || ''}
             ${planBadgeHtml ? `<span class="d-block mt-1">${planBadgeHtml}</span>` : ''}
           </div>
         </div>
@@ -2204,7 +2520,10 @@ window.resetFilters = function () {
   document.getElementById('filterTrangThaiHd').value = '';
   document.getElementById('filterTimNha').value = '';
   document.getElementById('filterDoKho').value = '';
+  document.getElementById('filterDeadline').value = '';
   document.getElementById('filterThuongTru').value = '';
+  document.getElementById('filterProvinceType').value = 'all';
+  document.getElementById('filterTamTru').value = 'all';
   document.getElementById('searchKeyword').value = '';
   document.getElementById('gpsFilterCheckState').value = 'ChuaCheck';
   document.getElementById('gpsFilterType').value = 'all';
@@ -2212,6 +2531,9 @@ window.resetFilters = function () {
   window.appState.gpsFilterEnabled = false;
   window.appState.apFilterEnabled = false;
   window.appState.dailyPlanFilterEnabled = false;
+  window.appState.deadlineSortEnabled = false;
+  window.appState.priorityFilterEnabled = false;
+  window.appState.deadlineFilter = '';
   window.appState.apFilterGroupMode = 'xa';
   window.appState.expandedApGroupKey = null;
   window.appState.expandedApChildKey = null;
@@ -2225,6 +2547,8 @@ window.resetFilters = function () {
   if (apButton) { apButton.textContent = '🏡 Ấp: TẮT'; apButton.classList.remove('btn-primary'); apButton.classList.add('btn-outline-primary'); }
   if (dailyButton) { dailyButton.textContent = '📅 Kế hoạch ngày: TẮT'; dailyButton.classList.remove('btn-info'); dailyButton.classList.add('btn-outline-info'); }
   if (apSwitch) apSwitch.classList.add('d-none');
+  setDeadlineSortButtonState(false);
+  setPriorityFilterButtonState(false);
   filterData();
   showToast('Đã đặt lại bộ lọc.', 'secondary');
 };

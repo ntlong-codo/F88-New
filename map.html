@@ -500,6 +500,15 @@
         </select>
       </div>
       <div class="mb-3">
+        <label class="form-label fw-bold small">⏳ Ngày quá hạn:</label>
+        <select id="mapDeadlineFilter" class="form-select" onchange="filterAndRenderMap()">
+          <option value="">Tất cả</option>
+          <option value="duoi_4_thang">Dưới 4 tháng</option>
+          <option value="duoi_7_thang">Dưới 7 tháng</option>
+          <option value="duoi_1_nam">Dưới 1 năm</option>
+        </select>
+      </div>
+      <div class="mb-3">
         <label class="form-label fw-bold small">Tìm kiếm khách hàng:</label>
         <input type="text" id="mapSearch" class="form-control" placeholder="Tên khách, số HĐ..." oninput="filterAndRenderMap()" />
       </div>
