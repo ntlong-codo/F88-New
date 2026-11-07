@@ -1048,21 +1048,25 @@ function buildCustomerPopupHtml(customer) {
   ].filter(Boolean).join('');
 
   return `
-    <div style="min-width:240px; max-width:290px; position:relative; padding-top:4px;">
+    <div style="min-width:230px; max-width:280px; position:relative; padding-top:4px; font-size:12px;">
       <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:8px; margin-bottom:6px;">
-        <div class="fw-bold text-primary" style="font-size:14px; line-height:1.3;">${escapeHtml(name)}</div>
-        <div style="font-size:11px; color:#0d6efd; white-space:nowrap; margin-left:auto;">📍 ${escapeHtml(distance)}</div>
+        <div class="fw-bold text-primary" style="font-size:14px; line-height:1.3; flex:1; min-width:0;">${escapeHtml(name)}</div>
+        <div style="font-size:11px; color:#0d6efd; white-space:nowrap;">📍 ${escapeHtml(distance)}</div>
       </div>
+
+      <div style="display:flex; flex-wrap:wrap; gap:5px; margin-bottom:6px;">
+        ${provinceBadgeHtml || ''}
+        ${tamTruBadgeHtml || ''}
+      </div>
+
       ${noteHtml}
       <div class="mb-1"><strong>HĐ:</strong> ${escapeHtml(soHd)}</div>
       <div class="mb-1"><strong>Địa chỉ:</strong> ${escapeHtml(diaChi)}</div>
-      ${provinceBadgeHtml || ''}
-      ${tamTruBadgeHtml || ''}
       ${apLines ? `<div class="mb-2">${apLines}</div>` : ''}
-      <div class="d-flex flex-wrap gap-2 justify-content-center">
-        <button type="button" class="btn btn-sm btn-success" onclick="window.doMapCustomerCheckGps(${rowIndex}, '${escapeHtml(soHd)}')">📍 Check GPS</button>
-        <button type="button" class="btn btn-sm btn-warning text-white" onclick="window.doMapCustomerCheckAo(${rowIndex}, '${escapeHtml(soHd)}')">🛡️ Check ảo</button>
-        <button type="button" class="btn btn-sm btn-primary" onclick="window.openCustomerDirections(${rowIndex})">🧭 Chỉ đường</button>
+      <div class="d-flex flex-wrap gap-2 justify-content-center mt-2">
+        <button type="button" class="btn btn-sm btn-success" onclick="window.doMapCustomerCheckGps(${rowIndex}, '${escapeHtml(soHd)}')">📍 Check</button>
+        <button type="button" class="btn btn-sm btn-warning text-white" onclick="window.doMapCustomerCheckAo(${rowIndex}, '${escapeHtml(soHd)}')">🛡️ Ảo</button>
+        <button type="button" class="btn btn-sm btn-primary" onclick="window.openCustomerDirections(${rowIndex})">🧭 Đường</button>
       </div>
     </div>
   `;

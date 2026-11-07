@@ -112,25 +112,27 @@
       display: flex;
       align-items: center;
       flex-wrap: wrap;
-      gap: 6px;
+      gap: 5px;
+      row-gap: 4px;
       margin-top: 4px;
     }
 
     .customer-badge {
-      font-size: 11px;
-      line-height: 1.3;
+      font-size: 10.5px;
+      line-height: 1.25;
       font-weight: 700;
       letter-spacing: 0.02em;
       border-radius: 999px;
-      padding: 5px 9px;
+      padding: 4px 8px;
       display: inline-flex;
       align-items: center;
       border: 1px solid transparent;
+      white-space: nowrap;
     }
 
     .customer-address {
       color: #24476c;
-      font-size: 12px;
+      font-size: 11.5px;
       font-weight: 600;
       line-height: 1.5;
       letter-spacing: 0.01em;
@@ -148,27 +150,97 @@
 
     .card-action-btn {
       min-width: 0;
-      padding: 0.4rem 0.6rem;
-      font-size: 12px;
+      min-height: 32px;
+      padding: 0.34rem 0.52rem;
+      font-size: 10.8px;
+      font-weight: 700;
+      line-height: 1.2;
       white-space: nowrap;
+      border-radius: 10px;
+      border-width: 1px;
+      box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.02);
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .card-action-btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 3px 8px rgba(15, 23, 42, 0.08);
+    }
+
+    .card-action-btn.btn-outline-primary {
+      background: rgba(13, 110, 253, 0.08);
+      border-color: rgba(13, 110, 253, 0.18);
+      color: #0d6efd;
+    }
+
+    .card-action-btn.btn-outline-success {
+      background: rgba(25, 135, 84, 0.08);
+      border-color: rgba(25, 135, 84, 0.18);
+      color: #198754;
+    }
+
+    .card-action-btn.btn-outline-warning {
+      background: rgba(255, 193, 7, 0.1);
+      border-color: rgba(255, 193, 7, 0.22);
+      color: #b7791f;
+    }
+
+    .card-action-btn.btn-outline-secondary {
+      background: rgba(108, 117, 125, 0.08);
+      border-color: rgba(108, 117, 125, 0.18);
+      color: #495057;
     }
 
     .card-action-btn .btn-label {
       display: inline;
     }
 
-    @media (max-width: 576px) {
+    @media (max-width: 767.98px) {
+      .customer-card {
+        padding: 10px 10px;
+      }
+
+      .customer-card > .d-flex {
+        flex-wrap: wrap;
+      }
+
+      .customer-card .flex-grow-1.min-w-0 {
+        flex: 1 1 100%;
+        min-width: 0;
+      }
+
       .card-action-group {
+        width: 100%;
+        justify-content: flex-start;
         gap: 4px;
       }
+
       .card-action-btn {
-        min-width: 34px;
-        width: 34px;
-        padding: 0.38rem 0;
+        flex: 1 1 calc(25% - 4px);
+        min-width: 0;
+        min-height: 30px;
+        padding: 0.28rem 0.38rem;
+        font-size: 10.5px;
+      }
+    }
+
+    @media (max-width: 576px) {
+      .card-action-group {
+        gap: 3px;
+      }
+      .card-action-btn {
+        flex: 1 1 calc(25% - 3px);
+        min-width: 0;
+        min-height: 30px;
+        padding: 0.3rem 0.22rem;
         text-align: center;
+        font-size: 10px;
       }
       .card-action-btn .btn-label {
         display: none;
+      }
+      .customer-address {
+        font-size: 11px;
       }
     }
 

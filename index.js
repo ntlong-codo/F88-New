@@ -1805,24 +1805,24 @@ function buildCustomerCardHtml(customer, index) {
     <div class="customer-card ${rowClass}" data-customer-row="${rowIndex}">
       <div class="d-flex justify-content-between align-items-start gap-2">
         <div class="flex-grow-1 min-w-0">
-          <div class="fw-bold text-primary mb-0">${escapeHtml(name)}</div>
-          ${categoryBadges.length ? `<div class="customer-badges">${categoryBadges.map((badge) => `<span class="customer-badge ${badge.className}">${escapeHtml(badge.label)}</span>`).join('')}</div>` : ''}
-          ${noteBadgeHtml}
-          <div class="customer-address text-truncate mt-1">${escapeHtml(summaryAddress)}</div>
+          <div class="fw-bold text-primary mb-1" style="font-size: 15px; line-height: 1.3;">${escapeHtml(name)}</div>
           <div class="d-flex align-items-center gap-2 flex-wrap mt-1">
-            <span class="badge bg-success text-white border border-success">${checkedToday ? '✓ check hôm nay' : ''}</span>
+            ${checkedToday ? '<span class="badge bg-success text-white border border-success">✓ hôm nay</span>' : ''}
             <span class="badge bg-info-subtle text-info-emphasis border border-info-subtle">📊 ${checkCount} lần</span>
             ${overdueRaw > 0 ? `<span class="badge bg-danger-subtle text-danger border border-danger-subtle">⏰ ${escapeHtml(ngayQuaHan)}</span>` : '<span class="badge bg-light text-secondary border border-secondary-subtle">⏰ ---</span>'}
             ${provinceBadgeHtml || ''}
             ${tamTruBadgeHtml || ''}
             ${planBadgeHtml ? `<span class="d-block mt-1">${planBadgeHtml}</span>` : ''}
           </div>
+          ${categoryBadges.length ? `<div class="customer-badges mt-2">${categoryBadges.map((badge) => `<span class="customer-badge ${badge.className}">${escapeHtml(badge.label)}</span>`).join('')}</div>` : ''}
+          ${noteBadgeHtml}
+          <div class="customer-address mt-2">${escapeHtml(summaryAddress || 'Chưa có địa chỉ')}</div>
         </div>
         <div class="card-action-group">
-          <button class="btn btn-sm btn-outline-primary card-action-btn" type="button" title="Check" onclick="toggleCardSection('${checkCollapseId}', ['${checkCollapseId}', '${infoCollapseId}', '${categoryCollapseId}', '${paymentCollapseId}'])"><span class="btn-label">✔ Check</span><span class="d-inline d-sm-none">✔</span></button>
-          <button class="btn btn-sm btn-outline-success card-action-btn" type="button" title="Thanh toán" onclick="toggleCardSection('${paymentCollapseId}', ['${checkCollapseId}', '${infoCollapseId}', '${categoryCollapseId}', '${paymentCollapseId}'])"><span class="btn-label">💰 Thanh toán</span><span class="d-inline d-sm-none">💰</span></button>
-          <button class="btn btn-sm btn-outline-warning card-action-btn" type="button" title="Phân loại" onclick="toggleCardSection('${categoryCollapseId}', ['${checkCollapseId}', '${infoCollapseId}', '${categoryCollapseId}', '${paymentCollapseId}'])"><span class="btn-label">🏷 Phân loại</span><span class="d-inline d-sm-none">🏷</span></button>
-          <button class="btn btn-sm btn-outline-secondary card-action-btn" type="button" title="Thông tin" onclick="toggleCardSection('${infoCollapseId}', ['${checkCollapseId}', '${infoCollapseId}', '${categoryCollapseId}', '${paymentCollapseId}'])"><span class="btn-label">ℹ Thông tin</span><span class="d-inline d-sm-none">ℹ</span></button>
+          <button class="btn btn-sm btn-outline-primary card-action-btn" type="button" title="Check" onclick="toggleCardSection('${checkCollapseId}', ['${checkCollapseId}', '${infoCollapseId}', '${categoryCollapseId}', '${paymentCollapseId}'])"><span class="btn-label">Check</span><span class="d-inline d-sm-none">✔</span></button>
+          <button class="btn btn-sm btn-outline-success card-action-btn" type="button" title="Thanh toán" onclick="toggleCardSection('${paymentCollapseId}', ['${checkCollapseId}', '${infoCollapseId}', '${categoryCollapseId}', '${paymentCollapseId}'])"><span class="btn-label">TT</span><span class="d-inline d-sm-none">💰</span></button>
+          <button class="btn btn-sm btn-outline-warning card-action-btn" type="button" title="Phân loại" onclick="toggleCardSection('${categoryCollapseId}', ['${checkCollapseId}', '${infoCollapseId}', '${categoryCollapseId}', '${paymentCollapseId}'])"><span class="btn-label">Loại</span><span class="d-inline d-sm-none">🏷</span></button>
+          <button class="btn btn-sm btn-outline-secondary card-action-btn" type="button" title="Thông tin" onclick="toggleCardSection('${infoCollapseId}', ['${checkCollapseId}', '${infoCollapseId}', '${categoryCollapseId}', '${paymentCollapseId}'])"><span class="btn-label">Info</span><span class="d-inline d-sm-none">ℹ</span></button>
         </div>
       </div>
 
