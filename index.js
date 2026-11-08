@@ -1579,6 +1579,19 @@ function isPlannedToday(customer) {
   return planValue === today;
 }
 
+function hasPhoneContactToday(customer) {
+  const phoneContactValue = String(customer.dalienhe_phone || customer['dalienhe_phone'] || '').trim();
+  if (!phoneContactValue) return false;
+
+  const contactDate = parseSheetDateValue(phoneContactValue);
+  if (!contactDate) return false;
+
+  const today = new Date();
+  return contactDate.getFullYear() === today.getFullYear() &&
+    contactDate.getMonth() === today.getMonth() &&
+    contactDate.getDate() === today.getDate();
+}
+
 function isPlannedTodayPending(customer) {
   return isPlannedToday(customer) && !hasCheckedToday(customer);
 }
@@ -1786,6 +1799,7 @@ function buildCustomerCardHtml(customer, index) {
   const tamTruBadgeHtml = tamTruStatus ? `<span class="badge" style="background-color:#f3e8ff;color:#6d28d9;border:1px solid #d8b4fe;">${tamTruStatus.label}</span>` : '';
   const categoryBadges = getCustomerCategoryBadges(customer);
   const planBadgeHtml = planTodayPending ? '<span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle">📅 Kế hoạch hôm nay</span>' : (customer.kehoachngay || customer['kehoachngay'] || customer.KehoachNgay || customer['KehoachNgay'] ? `<span class="badge bg-info-subtle text-info-emphasis border border-info-subtle">📅 ${escapeHtml(formatDateForDisplay(customer.kehoachngay || customer['kehoachngay'] || customer.KehoachNgay || customer['KehoachNgay']))}</span>` : '');
+  const phoneContactBadgeHtml = hasPhoneContactToday(customer) ? '<span class="badge bg-primary-subtle text-primary-emphasis border border-primary-subtle">📞 Đã liên hệ</span>' : '';
   const noteText = String(customer.Ghi_chu || customer['Ghi_chu'] || '').trim();
   const noteBadgeHtml = noteText ? `<div class="mt-1"><span class="badge bg-success-subtle text-success border border-success-subtle">📝 ${escapeHtml(noteText.length > 38 ? noteText.slice(0, 38) + '...' : noteText)}</span></div>` : '';
   let rowClass = '';
@@ -1813,6 +1827,7 @@ function buildCustomerCardHtml(customer, index) {
             ${provinceBadgeHtml || ''}
             ${tamTruBadgeHtml || ''}
             ${planBadgeHtml ? `<span class="d-block mt-1">${planBadgeHtml}</span>` : ''}
+            ${phoneContactBadgeHtml ? `<span class="d-block mt-1">${phoneContactBadgeHtml}</span>` : ''}
           </div>
           ${categoryBadges.length ? `<div class="customer-badges mt-2">${categoryBadges.map((badge) => `<span class="customer-badge ${badge.className}">${escapeHtml(badge.label)}</span>`).join('')}</div>` : ''}
           ${noteBadgeHtml}
@@ -1943,12 +1958,10 @@ function buildCustomerCardHtml(customer, index) {
             </div>
           </div>
 
-          <div class="mb-3">
-            <button class="btn btn-sm btn-outline-info w-100" type="button" onclick="setCustomerPlanToday(${rowIndex})">📅 Kế hoạch ngày</button>
-          </div>
-
-          <div id="gpsToggle_${rowIndex}" class="mb-2">
-            <button class="btn btn-sm btn-outline-primary w-100" type="button" onclick="toggleCheckGpsDetails(${rowIndex})">Mở GPS & ưu tiên</button>
+          <div class="d-flex gap-2 flex-wrap">
+            <button class="btn btn-xs btn-outline-info flex-fill" type="button" style="min-height: 30px; padding: 0.28rem 0.42rem; font-size: 10.5px;" onclick="setCustomerPlanToday(${rowIndex})">📅 Kế hoạch</button>
+            <button class="btn btn-xs btn-outline-primary flex-fill" type="button" style="min-height: 30px; padding: 0.28rem 0.42rem; font-size: 10.5px;" onclick="setCustomerPhoneContactToday(${rowIndex})">📞 Liên hệ</button>
+            <button id="gpsToggle_${rowIndex}" class="btn btn-xs btn-outline-secondary flex-fill" type="button" style="min-height: 30px; padding: 0.28rem 0.42rem; font-size: 10.5px;" onclick="toggleCheckGpsDetails(${rowIndex})">GPS & ưu tiên</button>
           </div>
 
           <div class="sub-section d-none" id="gpsDetails_${rowIndex}">
@@ -2116,6 +2129,28 @@ async function setCustomerPlanToday(rowIndex) {
     updateCustomerState(rowIndex, { kehoachngay: nextValue });
     if (window.appState.dailyPlanFilterEnabled) filterData();
     showToast(isAlreadyToday ? 'Đã xóa kế hoạch ngày hôm nay.' : 'Đã gán kế hoạch ngày hôm nay.', 'success');
+    refreshSingleCustomerCard(rowIndex);
+  }
+}
+
+async function setCustomerPhoneContactToday(rowIndex) {
+  const currentMonth = getCurrentMonthTabName();
+  if (!currentMonth || currentMonth === 'data') {
+    showToast('Vui lòng chọn kỳ tháng trước khi ghi liên hệ điện thoại.', 'danger');
+    return;
+  }
+
+  const currentCustomer = findCustomerByRowIndex(rowIndex) || {};
+  const todayValue = new Date().toLocaleDateString('vi-VN');
+  const currentValue = String(currentCustomer.dalienhe_phone || currentCustomer['dalienhe_phone'] || '').trim();
+  const isAlreadyToday = currentValue === todayValue;
+  const nextValue = isAlreadyToday ? '' : todayValue;
+
+  const saved = await quickUpdateCustomer(rowIndex, 'dalienhe_phone', nextValue);
+  if (saved) {
+    closeAllCardSectionsForRow(rowIndex);
+    updateCustomerState(rowIndex, { dalienhe_phone: nextValue });
+    showToast(isAlreadyToday ? 'Đã xóa ghi nhận liên hệ điện thoại hôm nay.' : 'Đã lưu liên hệ điện thoại hôm nay.', 'success');
     refreshSingleCustomerCard(rowIndex);
   }
 }

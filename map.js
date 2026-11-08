@@ -1019,6 +1019,17 @@ function isPlannedTodayPending(customer) {
   return sameDay && !alreadyCheckedToday;
 }
 
+function hasPhoneContactToday(customer) {
+  const phoneContactValue = String(customer.dalienhe_phone || customer['dalienhe_phone'] || '').trim();
+  if (!phoneContactValue) return false;
+
+  const parsed = new Date(phoneContactValue.includes('/') ? phoneContactValue.split('/').reverse().join('-') : phoneContactValue);
+  if (Number.isNaN(parsed.getTime())) return false;
+
+  const today = new Date();
+  return parsed.getFullYear() === today.getFullYear() && parsed.getMonth() === today.getMonth() && parsed.getDate() === today.getDate();
+}
+
 function getCustomerMarkerKey(customer) {
   const soHd = getObjectValueByAnyKey(customer, ['so_hd', 'SO_HD', 'So_HD']) || 'unknown';
   const name = getObjectValueByAnyKey(customer, ['Ten_khach_hang', 'ten_khach_hang']) || 'customer';
@@ -1040,6 +1051,7 @@ function buildCustomerPopupHtml(customer) {
   const distance = getCustomerDistanceText(customer);
   const provinceStatus = getCustomerProvinceLocationStatus(customer);
   const tamTruStatus = getCustomerTamTruStatus(customer);
+  const phoneContactBadgeHtml = hasPhoneContactToday(customer) ? `<div class="mb-1"><strong>Liên hệ:</strong> <span class="badge bg-primary-subtle text-primary-emphasis border border-primary-subtle">📞 Đã liên hệ qua điện thoại</span></div>` : '';
   const provinceBadgeHtml = provinceStatus ? `<div class="mb-1"><strong>Vùng:</strong> <span class="badge ${provinceStatus.isInProvince ? 'bg-success-subtle text-success-emphasis' : 'bg-warning-subtle text-warning-emphasis'}">${provinceStatus.label}</span> <span class="text-muted small">(${provinceStatus.provinceCode} / ${provinceStatus.shopCode})</span></div>` : '';
   const tamTruBadgeHtml = tamTruStatus ? `<div class="mb-1"><strong>Tạm Trú:</strong> <span class="badge" style="background-color:#f3e8ff;color:#6d28d9;border:1px solid #d8b4fe;">${tamTruStatus.label}</span></div>` : '';
   const apLines = [
@@ -1059,6 +1071,7 @@ function buildCustomerPopupHtml(customer) {
         ${tamTruBadgeHtml || ''}
       </div>
 
+      ${phoneContactBadgeHtml || ''}
       ${noteHtml}
       <div class="mb-1"><strong>HĐ:</strong> ${escapeHtml(soHd)}</div>
       <div class="mb-1"><strong>Địa chỉ:</strong> ${escapeHtml(diaChi)}</div>
@@ -1354,6 +1367,48 @@ async function setMapCustomerPlanToday(rowIndex) {
   }
 }
 
+async function setMapCustomerPhoneContactToday(rowIndex) {
+  const currentMonth = window.mapState?.selectedMonth || document.getElementById('mapMonth')?.value || '';
+  if (!currentMonth) {
+    showToast('Vui lòng chọn kỳ tháng trước khi ghi liên hệ điện thoại.', 'danger');
+    return;
+  }
+
+  const todayValue = new Date().toLocaleDateString('vi-VN');
+  const currentCustomer = (window.mapState?.allData || []).find((item) => Number(item.rowIndex || item['rowIndex'] || 0) === Number(rowIndex)) || {};
+  const currentValue = String(currentCustomer.dalienhe_phone || currentCustomer['dalienhe_phone'] || '').trim();
+  const isAlreadyToday = currentValue === todayValue;
+  const nextValue = isAlreadyToday ? '' : todayValue;
+
+  try {
+    await window.F88_API.post('updateCustomer', {
+      rowIndex: Number(rowIndex),
+      monthTab: currentMonth,
+      data: { dalienhe_phone: nextValue }
+    });
+
+    if (currentCustomer) {
+      currentCustomer.dalienhe_phone = nextValue;
+      currentCustomer['dalienhe_phone'] = nextValue;
+      if (window.mapState?.filteredData) {
+        const item = window.mapState.filteredData.find((entry) => Number(entry.rowIndex || entry['rowIndex'] || 0) === Number(rowIndex));
+        if (item) {
+          item.dalienhe_phone = nextValue;
+          item['dalienhe_phone'] = nextValue;
+        }
+      }
+    }
+
+    if (typeof window.filterAndRenderMap === 'function') {
+      window.filterAndRenderMap();
+    }
+    showToast(isAlreadyToday ? 'Đã xóa ghi nhận liên hệ điện thoại hôm nay.' : 'Đã lưu liên hệ điện thoại hôm nay.', 'success');
+  } catch (error) {
+    console.error(error);
+    showToast('Không thể cập nhật trạng thái liên hệ điện thoại.', 'danger');
+  }
+}
+
 function renderMapList(data) {
   const listNode = document.getElementById('sidebarCustomerList');
   if (!listNode) return;
@@ -1398,9 +1453,11 @@ function renderMapList(data) {
           <div class="customer-action-row">
             <button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); ${focusButtonAction}">${focused ? '📌' : '👁️'} ${focusButtonLabel}</button>
             <button class="btn btn-sm btn-outline-info" onclick="event.stopPropagation(); setMapCustomerPlanToday(${rowIndex})">📅 Kế hoạch ngày</button>
+            <button class="btn btn-sm btn-outline-primary" onclick="event.stopPropagation(); setMapCustomerPhoneContactToday(${rowIndex})">📞 Liên hệ</button>
             <button class="btn btn-sm btn-success" onclick="event.stopPropagation(); doMapCustomerCheckGps(${rowIndex}, '${escapeHtml(soHd)}')">📍 Check GPS</button>
             <button class="btn btn-sm btn-warning text-white" onclick="event.stopPropagation(); doMapCustomerCheckAo(${rowIndex}, '${escapeHtml(soHd)}')">🛡️ Check Áo</button>
             ${isPlannedTodayPending(customer) ? '<span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle align-self-center">📅 Kế hoạch hôm nay</span>' : ''}
+            ${hasPhoneContactToday(customer) ? '<span class="badge bg-primary-subtle text-primary-emphasis border border-primary-subtle align-self-center">📞 Đã liên hệ</span>' : ''}
           </div>
         </div>
       </div>
