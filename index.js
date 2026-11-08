@@ -1960,7 +1960,7 @@ function buildCustomerCardHtml(customer, index) {
 
           <div class="d-flex gap-2 flex-wrap">
             <button class="btn btn-xs btn-outline-info flex-fill" type="button" style="min-height: 30px; padding: 0.28rem 0.42rem; font-size: 10.5px;" onclick="setCustomerPlanToday(${rowIndex})">📅 Kế hoạch</button>
-            <button class="btn btn-xs btn-outline-primary flex-fill" type="button" style="min-height: 30px; padding: 0.28rem 0.42rem; font-size: 10.5px;" onclick="setCustomerPhoneContactToday(${rowIndex})">📞 Liên hệ</button>
+            <button class="btn btn-xs btn-outline-primary flex-fill" type="button" style="min-height: 30px; padding: 0.28rem 0.42rem; font-size: 10.5px;" onclick="setCustomerPhoneContactToday(${rowIndex})">📞 Đã Liên hệ</button>
             <button id="gpsToggle_${rowIndex}" class="btn btn-xs btn-outline-secondary flex-fill" type="button" style="min-height: 30px; padding: 0.28rem 0.42rem; font-size: 10.5px;" onclick="toggleCheckGpsDetails(${rowIndex})">GPS & ưu tiên</button>
           </div>
 
